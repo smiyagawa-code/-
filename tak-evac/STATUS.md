@@ -3,7 +3,7 @@
 - 担当：Claude（作業完了。編集は停止済み）
 - 成果物：outputs/TAKイーヴァック様_初回お打ち合わせ資料.pptx（表紙込み8枚・編集可能）
 - 骨子：outline.md　生成ソース：src/build.js（thomas-pptx の表紙・結びの装飾を使用）
-- 作り直し方：リポジトリ直下で `npm install pptxgenjs` を実行し、src/ で `node build.js` を実行する
+- 作り直し方：src/ で `npm install pptxgenjs` を実行し、続けて `node build.js` を実行する
 - 画像：使わない（理由は outline.md に記載）。Codexへの依頼はなし
 
 ## 確認記録
