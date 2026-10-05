@@ -1,0 +1,21 @@
+{
+  "name": "moc-acs-lepont-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ACS株式会社様 在庫・内示 AIダッシュボード（営業モック・架空データ / Cloudflare Workers）",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "node --test test/*.test.mjs",
+    "predeploy": "npm test",
+    "deploy": "wrangler deploy",
+    "verify": "node scripts/verify-deploy.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "jose": "^6.2.12"
+  },
+  "devDependencies": {
+    "wrangler": "^4.139.0"
+  }
+}
