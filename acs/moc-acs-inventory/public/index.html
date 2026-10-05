@@ -27,10 +27,12 @@
 
   <main class="layout">
     <aside class="side" aria-label="案件">
-      <button type="button" class="drop" id="drop">
+      <label class="drop" id="drop" tabindex="0">
         <span class="drop-icon" aria-hidden="true">＋</span>
         <span class="drop-text">内示をここに置く</span>
-      </button>
+        <input type="file" id="dropInput" accept=".csv,text/csv" hidden>
+      </label>
+      <div class="drop-foot"><span id="csvName" class="csv-name" hidden></span><button type="button" class="link small" id="sampleBtn">見本の CSV</button></div>
       <nav id="folders" class="folder-list"></nav>
     </aside>
 

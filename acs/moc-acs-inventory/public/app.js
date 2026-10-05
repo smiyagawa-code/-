@@ -2,7 +2,7 @@
 import { esc, fmt } from './util.js';
 import { setupChat, setChatContext, ask, openChat } from './chat.js';
 
-const state = { folder: 'all', base: '', tab: '' };
+const state = { folder: 'all', base: '', tab: '', csv: null, csvName: '' };
 let aiReady = false;
 let data = null;
 
@@ -49,9 +49,18 @@ async function init() {
 async function load() {
   const qs = new URLSearchParams({ folder: state.folder });
   if (state.base) qs.set('base', state.base);
-  const res = await fetch(`/api/data?${qs}`);
-  if (!res.ok) { text('panel', '読み込めませんでした。再読み込みしてください。'); return; }
+  // 置かれた内示 CSV があれば、その中身ごと送って計算し直してもらう（サーバーは保存しない）
+  const res = state.csv
+    ? await fetch('/api/data', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folder: state.folder, base: state.base || undefined, csv: state.csv }) })
+    : await fetch(`/api/data?${qs}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (state.csv) { state.csv = null; state.csvName = ''; openPop(`<h3>読めませんでした</h3><p class="pop-sub">${esc(body.error || 'CSV の形を確認してください')}</p>`); return load(); }
+    text('panel', '読み込めませんでした。再読み込みしてください。'); return;
+  }
   data = await res.json();
+  const nameEl = document.getElementById('csvName');
+  if (nameEl) { nameEl.hidden = !state.csv; nameEl.innerHTML = state.csv ? `${esc(state.csvName)} <button type="button" class="x" id="csvClear" aria-label="外す">×</button>` : ''; }
   state.base = data.base;
   state.folder = data.selectedFolder;
   if (!data.tabs.some((t) => t.id === state.tab)) state.tab = data.defaultTab;
@@ -66,7 +75,7 @@ async function load() {
   safe(() => renderFolders(), 'folders');
   safe(() => renderTabs(), 'tabs');
   safe(() => renderPanel(), 'panel');
-  if (aiReady) setChatContext({ folder: state.folder, base: data.base, examples: data.examples, scopeName: selected ? selected.name : 'すべての案件' });
+  if (aiReady) setChatContext({ folder: state.folder, base: data.base, examples: data.examples, scopeName: selected ? selected.name : 'すべての案件', csv: state.csv });
   writeHash();
 }
 
@@ -160,6 +169,14 @@ function onPanelClick(e) {
   }
 }
 document.addEventListener('click', (e) => {
+  if (e.target.closest('#csvClear')) { state.csv = null; state.csvName = ''; load(); return; }
+  if (e.target.closest('#sampleBtn')) {
+    openPop(`<h3>見本の内示 CSV</h3><p class="pop-sub">架空の内示です。保存して、左上の枠に落としてください。</p><ul class="files">
+      <li><a href="/sample/内示_前回_2026-08-28.csv" download>内示_前回_2026-08-28.csv</a><small>前回と同じ → 変わった点なし</small></li>
+      <li><a href="/sample/内示_今回_2026-09-25.csv" download>内示_今回_2026-09-25.csv</a><small>いま画面に出ている内示</small></li>
+      <li><a href="/sample/内示_今回_修正版.csv" download>内示_今回_修正版.csv</a><small>台数・希望日を変えたもの → 表が変わる</small></li></ul>`);
+    return;
+  }
   const copy = e.target.closest('[data-copy]');
   if (copy) {
     const pre = document.getElementById(copy.dataset.copy);
@@ -190,30 +207,45 @@ function closePop() {
   document.getElementById('overlay').hidden = true;
 }
 
-// ---------- 「内示をここに置く」（デモ用。中身は読まず、用意した案件を開く） ----------
+// ---------- 「内示をここに置く」: CSV を本当に読む（中身はサーバーへ送って計算。保存はしない） ----------
 function setupDrop() {
   const drop = document.getElementById('drop');
-  let playing = false;
-  const go = async () => { if (playing) return; playing = true; try { await playDrop(); } finally { playing = false; } };
-  drop.addEventListener('click', go);
+  const input = document.getElementById('dropInput');
+  input.addEventListener('change', () => { if (input.files?.[0]) importFile(input.files[0]); input.value = ''; });
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', go);
+  drop.addEventListener('drop', (e) => { const f = e.dataTransfer?.files?.[0]; if (f) importFile(f); });
+  drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
 }
-async function playDrop() {
-  const target = data.folders.find((f) => f.id === 'f02') || data.folders.find((f) => !f.pending);
-  const steps = ['読み取り中…', `${target.customer}`, `${target.name}`, '変わった点を調べました'];
-  openPop(`<div class="drop-play"><div class="spin" aria-hidden="true"></div><p id="dropStep">${esc(steps[0])}</p></div>`);
-  for (let i = 1; i < steps.length; i++) {
-    await wait(550);
-    const el = document.getElementById('dropStep');
-    if (el) el.textContent = steps[i];
-  }
-  await wait(450);
-  closePop();
-  state.folder = target.id;
-  state.tab = 'changes';
+async function importFile(file) {
+  if (!/\.(csv|txt)$/i.test(file.name) && !/csv|text/.test(file.type)) { openPop('<h3>CSV を置いてください</h3><p class="pop-sub">内示の CSV（数量・納入希望日の列があるもの）だけ読めます。</p>'); return; }
+  openPop(`<div class="drop-play"><div class="spin" aria-hidden="true"></div><p id="dropStep">読み取り中…</p><p class="muted">${esc(file.name)}</p></div>`);
+  const textBody = await readText(file);
+  const before = JSON.stringify((data?.folders || []).map((f) => [f.id, f.status]));
+  state.csv = textBody;
+  state.csvName = file.name;
+  await wait(500);
   await load();
+  if (!state.csv) return; // 読めなかった（load() が案内を出している）
+  const m = data.csv?.matched || [];
+  const changedFolders = data.folders.filter((f) => f.fromCsv);
+  const first = changedFolders.find((f) => f.status !== '変更なし') || changedFolders[0];
+  const after = JSON.stringify(data.folders.map((f) => [f.id, f.status]));
+  const summary = m.length
+    ? `<ul class="why-list">${m.map((x) => `<li>${esc(x.name)}</li>`).join('')}</ul>${data.csv.unmatched.length ? `<p class="muted">読めたが部品表がない行: ${data.csv.unmatched.map((u) => esc(u.name)).join('、')}</p>` : ''}${before === after && first ? '<p class="muted">前と同じ内示でした</p>' : ''}`
+    : '<p class="pop-sub">この画面の案件に当てはまる行がありませんでした（機種か案件名で照合）</p>';
+  openPop(`<h3>${m.length} 件の案件を読み取りました</h3>${summary}`);
+  await wait(1400);
+  closePop();
+  if (first) { state.folder = first.id; state.tab = 'changes'; await load(); }
+}
+function readText(file) {
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ''));
+    r.onerror = () => resolve('');
+    r.readAsText(file, 'utf-8');
+  });
 }
 
 // ---------- 小道具 ----------

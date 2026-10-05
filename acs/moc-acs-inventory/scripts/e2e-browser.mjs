@@ -1,8 +1,5 @@
-// ブラウザ操作テスト（手元で任意に実行。npm test には含めない）
-// 使い方: 別ターミナルで `npm run dev` を起動し、`npx playwright install chromium` 済みの状態で
-//   node scripts/e2e-browser.mjs
-// AI チャットは疑似応答に差し替え、「やること」「なぜ？」「文面コピー」「内示を置く」「フォルダ連動」「画面幅」を確かめる。
 import { chromium } from 'playwright';
+import fs from 'node:fs';
 const results = [];
 const ok = (name, cond, detail = '') => { results.push([cond ? 'OK' : 'NG', name, detail]); if (!cond) console.error('NG', name, detail); };
 const browser = await chromium.launch();
@@ -64,11 +61,13 @@ await page.click('[data-folder="f03"]'); await page.waitForTimeout(400);
 await page.click('[data-tab="changes"]'); await page.waitForTimeout(100);
 const c3 = await page.locator('#panel').textContent();
 ok('取消カードに 余る 3 点と「回せる」', /取消/.test(c3) && /回せる/.test(c3) && /クリーン用ベアリング\s*30/.test(c3));
-// 8. 内示を置く（デモ）
-await page.click('#drop'); await page.waitForTimeout(300);
+// 8. 内示を置く（本当に CSV を読む）
+await page.setInputFiles('#dropInput', { name: '内示_今回_2026-09-25.csv', mimeType: 'text/csv', buffer: fs.readFileSync('public/sample/内示_今回_2026-09-25.csv') });
+await page.waitForTimeout(300);
 ok('置くと「読み取り中…」', (await page.locator('#pop').textContent()).includes('読み取り中'));
-await page.waitForTimeout(2600);
-ok('置いたあとは 組立セル の 変わった点 が開く', (await page.locator('.folder.on').textContent()).includes('組立セル') && (await page.locator('.tab.on').textContent()).includes('変わった点'));
+await page.waitForTimeout(3000);
+ok('置いたあとは 読み取った案件の 変わった点 が開く', (await page.locator('.folder.on').textContent()).includes('第2工場') && (await page.locator('.tab.on').textContent()).includes('変わった点'));
+await page.click('#csvClear'); await page.waitForTimeout(400);
 // 9. 未着フォルダ
 await page.click('[data-folder="f05"]'); await page.waitForTimeout(400);
 await page.click('[data-tab="todo"]');

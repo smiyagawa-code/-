@@ -109,9 +109,93 @@ export const RULES = [
   { key: 'excess', name: '余る数', formula: '取消・変更でいらなくなった、頼み済みの分' },
 ];
 
+// ---------- 内示 CSV の読み取り（お客様から届く内示の形を想定。列名のゆれを吸収） ----------
+const COLS = {
+  date: ['内示日', '日付', '発行日'], customer: ['得意先', 'お客様', '顧客'], name: ['案件', '案件名', '件名'], model: ['機種', '型式', 'モデル'],
+  qty: ['数量', '台数'], due: ['納入希望日', '希望日', '希望納期', '納期'], options: ['仕様', 'オプション'], note: ['備考', 'コメント'],
+};
+export function parseNaishiCsv(text) {
+  const rows = csvRows(String(text || '').replace(/^\uFEFF/, ''));
+  if (rows.length < 2) return { rows: [], errors: ['表が空です'] };
+  const header = rows[0].map((h) => h.trim());
+  const idx = Object.fromEntries(Object.entries(COLS).map(([k, names]) => [k, header.findIndex((h) => names.includes(h))]));
+  const errors = [];
+  for (const k of ['name', 'qty', 'due']) if (idx[k] < 0) errors.push(`列「${COLS[k][0]}」がありません`);
+  if (errors.length) return { rows: [], errors };
+  const get = (r, k) => (idx[k] >= 0 ? (r[idx[k]] || '').trim() : '');
+  const out = [];
+  rows.slice(1).forEach((r, i) => {
+    if (r.every((c) => !c.trim())) return;
+    const line = i + 2;
+    const qty = Number(get(r, 'qty').replace(/[台個,]/g, ''));
+    const due = isoDate(get(r, 'due'));
+    if (!Number.isInteger(qty) || qty < 0) { errors.push(`${line}行目: 数量「${get(r, 'qty')}」が読めません`); return; }
+    if (!due) { errors.push(`${line}行目: 納入希望日「${get(r, 'due')}」が読めません`); return; }
+    out.push({
+      line, date: isoDate(get(r, 'date')) || '', customer: get(r, 'customer'), name: get(r, 'name'), model: get(r, 'model'), qty, due,
+      options: get(r, 'options').split(/[・、,/／]/).map((o) => o.trim()).filter((o) => o && o !== '標準' && o !== 'なし'),
+      note: get(r, 'note'),
+    });
+  });
+  return { rows: out, errors };
+}
+function csvRows(text) {
+  const rows = []; let row = []; let cell = ''; let q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; continue; }
+    if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+function isoDate(s) {
+  const m = String(s).trim().match(/^(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})日?$/);
+  if (!m) return '';
+  const d = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  return Number.isNaN(Date.parse(`${d}T00:00:00Z`)) ? '' : d;
+}
+// CSV の行を案件に当てはめる（機種 → 案件名 の順で照合）。当てはまった案件は「今回の内示」を CSV の値に差し替える
+function applyCsv(rows) {
+  const matched = [], unmatched = [];
+  const over = {};
+  for (const r of rows) {
+    const f = FOLDERS.find((x) => (r.model && x.model === r.model) || x.name === r.name);
+    if (!f || f.pending) { unmatched.push(r); continue; }
+    over[f.id] = r;
+    matched.push({ folderId: f.id, name: f.name, line: r.line });
+  }
+  return { over, matched, unmatched };
+}
+// CSV から読み取った内示の「確かめること」（記載のゆれを機械的に拾う。AI は使わない）
+function readingFromCsv(f, r) {
+  const src = (col) => `CSV ${r.line}行目「${col}」`;
+  const items = [
+    { field: '台数', value: r.qty ? `${r.qty}台` : '0台 → 取消', from: src('数量'), check: false },
+    { field: '希望日', value: r.due, from: src('納入希望日'), check: false },
+    { field: '仕様', value: r.options.join('・') || '標準', from: src('仕様'), check: false },
+  ];
+  if (r.note) items.push({ field: '備考', value: `「${r.note}」`, from: src('備考'), check: false });
+  if (r.options.some((o) => /ライトカーテン/.test(o) && !/段/.test(o))) items.push({ field: '要確認', ask: 'ライトカーテンは 4段？ 2段？', value: '「ライトカーテン仕様」の段数の記載がない（4段で読み取り）', from: src('仕様'), check: true });
+  if (r.qty === 0) items.push({ field: '要確認', ask: '「取消」は内示の取消？ 注文の取消？', value: '「取消」が内示の取消か、注文の取消かが読み取れない', from: src('備考'), check: true });
+  const m = r.note.match(/(\d{1,2})\/(\d{1,2})/);
+  if (m && `${Number(m[1])}/${Number(m[2])}` !== md(r.due)) items.push({ field: '要確認', ask: `希望日は ${md(r.due)}？ それとも備考の ${Number(m[1])}/${Number(m[2])}？`, value: `備考に「${m[0]}」とあり、納入希望日（${md(r.due)}）と食い違う`, from: src('備考'), check: true });
+  return items;
+}
+
 // ---------- 計算（ここだけ） ----------
-function build(base = DEFAULT_BASE) {
-  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(f, base)));
+function build(base = DEFAULT_BASE, csvRowsIn = null) {
+  const { over, matched, unmatched } = csvRowsIn ? applyCsv(csvRowsIn) : { over: {}, matched: [], unmatched: [] };
+  const withCsv = (f) => {
+    const r = over[f.id];
+    if (!r) return f;
+    const sep = { date: r.date || f.versions.sep.date, qty: r.qty, due: r.due, options: r.options, note: r.note };
+    return { ...f, versions: { aug: f.versions.aug, sep }, reading: readingFromCsv(f, r), fromCsv: true };
+  };
+  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(withCsv(f), base)));
   // 回せる先: 余った頼み済み分と同じ型番が、ほかの案件で足りない
   for (const f of folders) {
     for (const ex of f.excess) {
@@ -119,12 +203,13 @@ function build(base = DEFAULT_BASE) {
     }
   }
   for (const f of folders) if (!f.pending) f.todos = buildTodos(f, base);
-  return { base, urgentUntil: addDays(base, URGENT_DAYS), folders };
+  return { base, urgentUntil: addDays(base, URGENT_DAYS), folders, csv: csvRowsIn ? { matched, unmatched: unmatched.map((r) => ({ line: r.line, name: r.name || r.model || '(案件名なし)' })) } : null };
 }
 
 function buildFolder(f, base) {
   const { aug, sep } = f.versions;
-  const need = (v, code, opt) => (opt && !v.options.includes(opt) ? 0 : v.qty * (f.bom.find(([c, , o]) => c === code && (o || null) === (opt || null))?.[1] ?? 0));
+  const hasOpt = (v, opt) => v.options.some((o) => o === opt || o.includes(opt) || opt.includes(o));
+  const need = (v, code, opt) => (opt && !hasOpt(v, opt) ? 0 : v.qty * (f.bom.find(([c, , o]) => c === code && (o || null) === (opt || null))?.[1] ?? 0));
   const codes = [...new Set(f.bom.map(([c]) => c))];
   const parts = codes.map((code) => {
     const p = PART[code];
@@ -171,7 +256,8 @@ function buildFolder(f, base) {
     if (sep.qty !== aug.qty) changes.push({ kind: sep.qty > aug.qty ? '増えた' : '減った', title: `${aug.qty}台 → ${sep.qty}台`, note: sep.note, affected: parts.filter((p) => !p.optionOnly && p.needSep !== p.needAug).map((p) => p.code) });
     if (sep.due !== aug.due) changes.push({ kind: sep.due < aug.due ? '前倒し' : '後ろ倒し', title: `希望日 ${md(aug.due)} → ${md(sep.due)}`, note: `${Math.abs(daysBetween(aug.due, sep.due))}日${sep.due < aug.due ? '早く' : '遅く'}`, affected: parts.filter((p) => p.late > 0).map((p) => p.code) });
     const added = sep.options.filter((o) => !aug.options.includes(o)), removed = aug.options.filter((o) => !sep.options.includes(o));
-    if (added.length || removed.length) changes.push({ kind: '仕様変更', title: `${removed.join('・') || 'なし'} → ${added.join('・') || 'なし'}`, note: '', affected: parts.filter((p) => p.optNames.some((o) => added.includes(o) || removed.includes(o))).map((p) => p.code) });
+    const touches = (list, o) => list.some((x) => x === o || x.includes(o) || o.includes(x));
+    if (added.length || removed.length) changes.push({ kind: '仕様変更', title: `${removed.join('・') || 'なし'} → ${added.join('・') || 'なし'}`, note: '', affected: parts.filter((p) => p.optNames.some((o) => touches(added, o) || touches(removed, o))).map((p) => p.code) });
   }
   const excess = parts.filter((p) => p.excess > 0).map((p) => ({ code: p.code, name: p.name, maker: p.maker, excess: p.excess, poDate: p.poDate, amount: p.excess * p.price }));
   return { ...f, parts, changes, excess, todos: [] };
@@ -229,9 +315,9 @@ function buildTodos(f, base) {
 }
 
 // ---------- 画面向け ----------
-export function getDemoData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
+export function getDemoData({ base = DEFAULT_BASE, folder = 'all', csv = null } = {}) {
   base = normalizeBase(base);
-  const b = build(base);
+  const b = build(base, normalizeCsv(csv));
   const selected = b.folders.find((f) => f.id === folder) || null;
   const active = b.folders.filter((f) => !f.pending);
   const scope = selected ? [selected] : active;
@@ -257,6 +343,7 @@ export function getDemoData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
   return {
     title: '内示チェック',
     asOf: md(base), base, baseOptions: BASE_DATES,
+    csv: b.csv,
     footNote: '架空データ',
     selectedFolder: selected ? selected.id : 'all',
     defaultTab: 'todo',
@@ -266,7 +353,7 @@ export function getDemoData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
       { id: 'parts', label: '部品の一覧', count: rows.length },
     ],
     folders: b.folders.map((f) => ({
-      id: f.id, customer: f.customer, name: f.name, model: f.model, pending: f.pending || '',
+      id: f.id, customer: f.customer, name: f.name, model: f.model, pending: f.pending || '', fromCsv: Boolean(f.fromCsv),
       status: f.pending ? '今回の内示 未着' : f.changes.length ? f.changes.map((c) => c.kind).join('・') : '変更なし',
       red: f.todos.filter((t) => t.tone === 'red').length, todos: f.todos.length,
     })),
@@ -302,9 +389,9 @@ function suggestQuestions(selected, rows, changes) {
 }
 
 // ---------- AI 向け（画面と同じ build() の結果。選択中のフォルダだけを渡す） ----------
-export function getAiData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
+export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null } = {}) {
   base = normalizeBase(base);
-  const b = build(base);
+  const b = build(base, normalizeCsv(csv));
   const selected = b.folders.find((f) => f.id === folder) || null;
   const scope = selected ? [selected] : b.folders.filter((f) => !f.pending);
   const partRow = (f, p) => ({
@@ -334,7 +421,16 @@ export function getAiData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
 }
 
 // テスト用に計算結果をそのまま出す
-export function _build(base = DEFAULT_BASE) { return build(normalizeBase(base)); }
+export function _build(base = DEFAULT_BASE, csv = null) { return build(normalizeBase(base), normalizeCsv(csv)); }
+
+// 画面から来る csv は「CSV の文字列」か「parseNaishiCsv の rows」。どちらでも受ける。大きすぎるものは無視
+const MAX_CSV_CHARS = 20000;
+function normalizeCsv(csv) {
+  if (!csv) return null;
+  if (typeof csv === 'string') return csv.length > MAX_CSV_CHARS ? null : parseNaishiCsv(csv).rows;
+  if (Array.isArray(csv)) return csv.filter((r) => r && typeof r.name === 'string' && Number.isInteger(r.qty) && typeof r.due === 'string').slice(0, 50);
+  return null;
+}
 export { FOLDERS as _FOLDERS, PART as _PART };
 
 // ---------- 小道具 ----------

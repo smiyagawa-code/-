@@ -4,7 +4,7 @@ import { esc } from './util.js';
 
 const MAX_MESSAGES = 20; // サーバーの上限と同じ（10往復）
 let history = [];
-let context = { folder: 'all', base: '', examples: [], scopeName: '全案件' };
+let context = { folder: 'all', base: '', examples: [], scopeName: '全案件', csv: null };
 
 export function setupChat() {
   const form = document.getElementById('form');
@@ -28,7 +28,7 @@ export function setupChat() {
 
 // フォルダ・基準日が変わったら、おすすめ質問を差し替え、会話をいったん区切る（前の案件の話と混ざらないように）
 export function setChatContext(next) {
-  const changed = next.folder !== context.folder || next.base !== context.base;
+  const changed = next.folder !== context.folder || next.base !== context.base || (next.csv ?? null) !== (context.csv ?? null);
   context = { ...context, ...next };
   document.getElementById('chips').innerHTML = (context.examples || []).map((q) => `<button type="button">${esc(q)}</button>`).join('');
   const scope = document.getElementById('chatScope');
@@ -61,7 +61,7 @@ export async function ask(text) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: history, folder: context.folder, base: context.base }),
+      body: JSON.stringify({ messages: history, folder: context.folder, base: context.base, ...(context.csv ? { csv: context.csv } : {}) }),
     });
     const body = await res.json().catch(() => ({}));
     pending.remove();
