@@ -9,6 +9,8 @@ let context = { folder: 'all', base: '', examples: [], scopeName: '全案件' };
 export function setupChat() {
   const form = document.getElementById('form');
   const input = document.getElementById('input');
+  document.getElementById('chatFab').addEventListener('click', openChat);
+  document.getElementById('chatClose').addEventListener('click', closeChat);
   document.getElementById('chips').addEventListener('click', (e) => {
     if (e.target.tagName === 'BUTTON') ask(e.target.textContent);
   });
@@ -30,11 +32,21 @@ export function setChatContext(next) {
   context = { ...context, ...next };
   document.getElementById('chips').innerHTML = (context.examples || []).map((q) => `<button type="button">${esc(q)}</button>`).join('');
   const scope = document.getElementById('chatScope');
-  if (scope) scope.textContent = `いま見ている範囲: ${context.scopeName}（基準日 ${context.baseLabel || ''}）`;
+  if (scope) scope.textContent = context.scopeName;
   if (changed && history.length) {
     history = [];
-    addMsg('assistant intro', `以降は「${esc(context.scopeName)}」の表をもとに答えます。`);
+    addMsg('assistant intro', `ここからは「${esc(context.scopeName)}」について答えます。`);
   }
+}
+
+export function openChat() {
+  document.getElementById('chat').hidden = false;
+  document.getElementById('chatFab').hidden = true;
+  document.getElementById('input')?.focus?.();
+}
+export function closeChat() {
+  document.getElementById('chat').hidden = true;
+  document.getElementById('chatFab').hidden = false;
 }
 
 export async function ask(text) {

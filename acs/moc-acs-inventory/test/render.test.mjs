@@ -41,13 +41,14 @@ test('全フォルダ × 全タブで画面が壊れない', async () => {
     await import('../public/app.js');
     await globalThis.__dashboardReady;
     const tabs = getDemoData().tabs.map((t) => t.id);
+    assert.equal(tabs.length, 3);
     for (const folder of ['all', ..._FOLDERS.map((f) => f.id)]) {
       els.get('folders').fire('click', { target: { closest: () => ({ dataset: { folder } }) } });
       await new Promise((r) => setTimeout(r, 5));
       for (const tab of tabs) {
         els.get('tabs').fire('click', { target: { closest: () => ({ dataset: { tab } }) } });
         const html = `${els.get('panel').innerHTML} ${els.get('folders').innerHTML} ${els.get('tabs').innerHTML}`;
-        for (const bad of ['undefined', 'NaN', 'Infinity', '表示できません', '[object Object]', 'null']) {
+        for (const bad of ['undefined', 'NaN', 'Infinity', '表示できません', '[object Object]', 'null', 'リードタイム', '基準日', '発注残']) {
           assert.ok(!html.includes(bad), `${folder}/${tab}: 画面に「${bad}」が出ている`);
         }
         assert.ok(els.get('panel').innerHTML.includes('<article'), `${folder}/${tab}: 中身が空`);
@@ -57,5 +58,5 @@ test('全フォルダ × 全タブで画面が壊れない', async () => {
     console.error = origError;
   }
   assert.deepEqual(errors, [], `組み立て中のエラー: ${errors.join(' / ')}`);
-  assert.ok(els.get('basePick').innerHTML.includes('<option'), '基準日の選択肢が出ていない');
+  assert.ok(els.get('scopeName').textContent, '範囲の名前が出ていない');
 });

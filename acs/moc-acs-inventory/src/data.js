@@ -57,7 +57,7 @@ const FOLDERS = [
       { field: '希望納期', value: '2026-11-14', from: '9月版 PDF 1ページ目「納入希望日」', check: false },
       { field: 'オプション', value: 'NG排出シュート（3台とも）', from: '9月版 PDF 備考欄', check: false },
       { field: '備考', value: '「3号機は増産対応のため追加」', from: '9月版 PDF 備考欄', check: false },
-      { field: '要確認', value: '備考欄に手書きで「できれば 11/7」とあり、納入希望日の欄（11/14）と食い違う', from: '9月版 PDF 備考欄（手書き）', check: true },
+      { field: '要確認', ask: '希望日は 11/14？ それとも手書きの 11/7？', value: '備考欄に手書きで「できれば 11/7」とあり、納入希望日の欄（11/14）と食い違う', from: '9月版 PDF 備考欄（手書き）', check: true },
     ],
   },
   {
@@ -76,7 +76,7 @@ const FOLDERS = [
       { field: '希望納期', value: '2026-10-15（8月版は 2026-11-10）', from: '9月版 CSV 行3「希望納期」', check: false },
       { field: 'オプション', value: 'ライトカーテン仕様（8月版は 安全柵）', from: '9月版 CSV 行3「仕様」', check: false },
       { field: '備考', value: '「工場レイアウト変更に伴い前倒し」', from: '9月版 CSV 行3「備考」', check: false },
-      { field: '要確認', value: '「ライトカーテン仕様」の段数の記載がない（4段で読み取り。2段の可能性あり）', from: '9月版 CSV 行3「仕様」', check: true },
+      { field: '要確認', ask: 'ライトカーテンは 4段？ 2段？', value: '「ライトカーテン仕様」の段数の記載がない（4段で読み取り。2段の可能性あり）', from: '9月版 CSV 行3「仕様」', check: true },
     ],
   },
   {
@@ -90,7 +90,7 @@ const FOLDERS = [
     reading: [
       { field: '台数', value: '0台（8月版は 1台）→ 取消', from: '9月版 PDF 1ページ目「数量 0」と備考「取消」', check: false },
       { field: '備考', value: '「クリーンルーム計画の見直しのため取消。再開時期は未定」', from: '9月版 PDF 備考欄', check: false },
-      { field: '要確認', value: '「取消」が内示の取消か、注文の取消かが読み取れない（内示段階のため発注残は当社判断）', from: '9月版 PDF 備考欄', check: true },
+      { field: '要確認', ask: '「取消」は内示の取消？ 注文の取消？', value: '「取消」が内示の取消か、注文の取消かが読み取れない（内示の段階なので、頼み済み分の扱いは当社判断）', from: '9月版 PDF 備考欄', check: true },
     ],
   },
   { id: 'f04', customer: '北都電装株式会社', name: '検査装置 更新', model: 'VIS-100', pending: '9月版の内示がまだ届いていません（8月版のみ）。先方の購買ご担当に 10/3 に確認済み、10/8 送付予定' },
@@ -98,28 +98,27 @@ const FOLDERS = [
   { id: 'f06', customer: '相模オートメーション株式会社', name: 'ワーク供給装置', model: 'FD-20', pending: '8月版・9月版とも未受領（口頭のみ）。書面の内示を依頼中' },
 ];
 
+// 計算のしかた（現場の言葉。画面の「？」と AI の両方がこれを使う）
 export const RULES = [
-  { key: 'need', name: '必要数', formula: '台数 × 1台あたりの使用数（オプション部品は、そのオプションのときだけ）' },
-  { key: 'short', name: '不足', formula: '必要数 −（引当済みの在庫 ＋ 発注残）。0 未満は 0' },
-  { key: 'order', name: '追加手配', formula: '不足をロットの倍数に切り上げ' },
-  { key: 'eta', name: '入手見込み', formula: '基準日 ＋ 発注リードタイム ＋ メーカー案内の遅れ（追加手配する部品）／ 発注残の入荷予定日（追加手配しない部品）' },
-  { key: 'late', name: '遅れ', formula: '入手見込み − 希望納期。プラスなら遅れ' },
-  { key: 'deadline', name: '発注期限', formula: '希望納期 − 発注リードタイム − メーカー案内の遅れ' },
-  { key: 'urgent', name: '急ぐ', formula: `発注期限が基準日から ${URGENT_DAYS}日以内、または過ぎている（追加手配がある部品だけ）` },
-  { key: 'excess', name: '過剰', formula: '取消・仕様変更で不要になった部品の発注残（在庫は他案件で使えるため数えない）' },
+  { key: 'need', name: 'いる数', formula: '台数 × 1台に使う数' },
+  { key: 'short', name: '足りない数', formula: 'いる数 − 今ある分（在庫 ＋ メーカーに頼み済み）' },
+  { key: 'order', name: '手配する数', formula: '足りない数を、まとめ買いの単位に切り上げ' },
+  { key: 'eta', name: '届く日', formula: '今日 ＋ メーカーの納期 ＋ メーカーからの遅れ連絡' },
+  { key: 'late', name: '遅れ', formula: '届く日 − お客様の希望日' },
+  { key: 'deadline', name: '発注の締切', formula: '希望日 − メーカーの納期。締切まで 1週間を切ったら「急ぎ」' },
+  { key: 'excess', name: '余る数', formula: '取消・変更でいらなくなった、頼み済みの分' },
 ];
 
 // ---------- 計算（ここだけ） ----------
 function build(base = DEFAULT_BASE) {
-  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], actions: [] } : buildFolder(f, base)));
-  // 振替候補: 過剰になった発注残と同じ型番が、ほかの案件で不足している
+  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(f, base)));
+  // 回せる先: 余った頼み済み分と同じ型番が、ほかの案件で足りない
   for (const f of folders) {
     for (const ex of f.excess) {
       ex.transfer = folders.filter((o) => o.id !== f.id).flatMap((o) => o.parts.filter((p) => p.code === ex.code && p.short > 0).map((p) => ({ folderId: o.id, folderName: o.name, short: p.short })));
     }
   }
-  // 次のアクション（文面の下書き）は、振替候補まで決まってから作る
-  for (const f of folders) if (!f.pending) f.actions = buildActions(f, f.parts, f.changes, f.excess, base);
+  for (const f of folders) if (!f.pending) f.todos = buildTodos(f, base);
   return { base, urgentUntil: addDays(base, URGENT_DAYS), folders };
 }
 
@@ -133,71 +132,100 @@ function buildFolder(f, base) {
     const needAug = sum(opts.map((o) => need(aug, code, o)));
     const needSep = sum(opts.map((o) => need(sep, code, o)));
     const [stock, po, poDate] = f.alloc[code] || [0, 0, ''];
-    const short = Math.max(0, needSep - (stock + po));
+    const have = stock + po;
+    const short = Math.max(0, needSep - have);
     const order = short > 0 ? Math.ceil(short / p.lot) * p.lot : 0;
     const eta = short > 0 ? addDays(base, p.lt + p.delay) : po > 0 && needSep > 0 ? poDate : '';
-    const etaKind = short > 0 ? '追加手配' : eta ? '発注残の入荷' : '';
+    const etaKind = short > 0 ? '手配' : eta ? '頼み済み分の入荷' : '';
     const late = eta && sep.qty > 0 ? daysBetween(sep.due, eta) : 0;
     const deadline = short > 0 ? addDays(sep.due, -(p.lt + p.delay)) : '';
     const urgent = Boolean(deadline) && deadline <= addDays(base, URGENT_DAYS);
     const optNames = opts.filter(Boolean);
     const optionOnly = opts.every(Boolean);
-    const excess = needSep < needAug && po > 0 ? Math.max(0, Math.min(po, stock + po - needSep)) : 0;
+    const excess = needSep < needAug && po > 0 ? Math.max(0, Math.min(po, have - needSep)) : 0;
+    const perUnit = sep.qty ? needSep / sep.qty : 0;
+    // 「なぜ？」で出す文（現場の言葉・1行ずつ・実際の数字入り）。画面と AI の両方がこれを使う
+    const why = [
+      sep.qty ? `${sep.qty}台 × 1台に${perUnit}個 ＝ ${needSep}個いる` : `取消なので 0個でよい（前回は ${needAug}個）`,
+      `今ある分 ${have}個（在庫 ${stock} ＋ 頼み済み ${po}）`,
+      short > 0 ? `${needSep} − ${have} ＝ ${short}個足りない` : needSep > 0 ? `${needSep} − ${have} ≦ 0 → 足りている` : excess ? `頼み済み ${po}個のうち ${excess}個が余る` : '',
+      short > 0 && order !== short ? `${short}個 → まとめ買いの単位 ${p.lot}個 → ${order}個手配` : short > 0 ? `${order}個手配` : '',
+      short > 0 ? `${md(base)} ＋ 納期 ${p.lt}日${p.delay ? ` ＋ 遅れ連絡 ${p.delay}日` : ''} ＝ ${md(eta)} に届く` : eta ? `頼み済み分が ${md(eta)} に届く` : '',
+      eta && sep.qty > 0 ? `${md(eta)} − 希望日 ${md(sep.due)} ＝ ${late > 0 ? `${late}日遅れ` : `${-late}日前に届く`}` : '',
+      deadline ? `発注の締切 ${md(deadline)}（希望日 − 納期）${deadline < base ? ' → 過ぎている' : urgent ? ' → 今週中' : ''}` : '',
+    ].filter(Boolean);
     return {
       code, name: p.name, maker: p.maker, lt: p.lt, lot: p.lot, price: p.price, delay: p.delay,
       option: optNames.join('・'), optionOnly, optNames,
-      needAug, needSep, stock, po, poDate, short, order, eta, etaKind, late, deadline, urgent, excess,
-      // 根拠（画面のツールチップと AI の両方がこれを使う。式に実際の数字を入れる）
-      basis: {
-        need: `${sep.qty}台 × ${sep.qty ? needSep / sep.qty : 0}個${optNames.length && !optionOnly ? `（うちオプション「${optNames.join('・')}」分 ${sep.qty ? sum(optNames.map((o) => need(sep, code, o))) : 0}）` : ''} ＝ 必要数 ${needSep}`,
-        short: `必要数 ${needSep} −（在庫 ${stock} ＋ 発注残 ${po}）＝ ${needSep - (stock + po) < 0 ? `${needSep - (stock + po)} → 不足なし` : `不足 ${short}`}`,
-        order: short > 0 ? `不足 ${short} → ロット ${p.lot} の倍数に切り上げ ＝ 追加手配 ${order}` : '追加手配なし',
-        eta: short > 0
-          ? `基準日 ${md(base)} ＋ リードタイム ${p.lt}日${p.delay ? ` ＋ メーカー案内の遅れ ${p.delay}日` : ''} ＝ 入手見込み ${md(eta)}`
-          : eta ? `発注残 ${po} の入荷予定日 ${md(eta)}` : '',
-        late: eta && sep.qty > 0 ? `入手見込み ${md(eta)} − 希望納期 ${md(sep.due)} ＝ ${late > 0 ? `${late}日の遅れ` : `${-late}日の余裕`}` : '',
-        deadline: deadline ? `希望納期 ${md(sep.due)} − リードタイム ${p.lt}日${p.delay ? ` − 案内の遅れ ${p.delay}日` : ''} ＝ 発注期限 ${md(deadline)}${deadline < base ? '（期限を過ぎています）' : urgent ? `（${md(addDays(base, URGENT_DAYS))} までに発注）` : ''}` : '',
-      },
+      needAug, needSep, stock, po, poDate, have, short, order, eta, etaKind, late, deadline, urgent, excess, why,
+      status: sep.qty === 0 ? (excess ? '余る' : '－') : late > 0 ? `${late}日遅れ` : short > 0 ? '手配すれば間に合う' : excess ? '余る' : '足りている',
+      tone: late > 0 ? 'red' : short > 0 && urgent ? 'amber' : excess ? 'amber' : short > 0 ? 'blue' : 'ok',
     };
   });
 
-  // 変更点（8月版 → 9月版）
+  // 変わった点（前回 → 今回）
   const changes = [];
   if (aug.qty > 0 && sep.qty === 0) {
-    changes.push({ kind: '取消', title: `${aug.qty}台 → 取消`, before: `${aug.qty}台`, after: '取消', note: sep.note, affected: parts.filter((p) => p.needAug > 0).map((p) => p.code) });
+    changes.push({ kind: '取消', title: `${aug.qty}台 → 取消`, note: sep.note, affected: parts.filter((p) => p.needAug > 0).map((p) => p.code) });
   } else {
-    if (sep.qty !== aug.qty) changes.push({ kind: sep.qty > aug.qty ? '増量' : '減量', title: `${aug.qty}台 → ${sep.qty}台`, before: `${aug.qty}台`, after: `${sep.qty}台`, note: sep.note, affected: parts.filter((p) => !p.optionOnly && p.needSep !== p.needAug).map((p) => p.code) });
-    if (sep.due !== aug.due) changes.push({ kind: sep.due < aug.due ? '前倒し' : '後ろ倒し', title: `希望納期 ${md(aug.due)} → ${md(sep.due)}`, before: md(aug.due), after: md(sep.due), note: `${Math.abs(daysBetween(aug.due, sep.due))}日の${sep.due < aug.due ? '前倒し' : '後ろ倒し'}`, affected: parts.filter((p) => p.late > 0).map((p) => p.code) });
+    if (sep.qty !== aug.qty) changes.push({ kind: sep.qty > aug.qty ? '増えた' : '減った', title: `${aug.qty}台 → ${sep.qty}台`, note: sep.note, affected: parts.filter((p) => !p.optionOnly && p.needSep !== p.needAug).map((p) => p.code) });
+    if (sep.due !== aug.due) changes.push({ kind: sep.due < aug.due ? '前倒し' : '後ろ倒し', title: `希望日 ${md(aug.due)} → ${md(sep.due)}`, note: `${Math.abs(daysBetween(aug.due, sep.due))}日${sep.due < aug.due ? '早く' : '遅く'}`, affected: parts.filter((p) => p.late > 0).map((p) => p.code) });
     const added = sep.options.filter((o) => !aug.options.includes(o)), removed = aug.options.filter((o) => !sep.options.includes(o));
-    if (added.length || removed.length) changes.push({ kind: 'オプション', title: `${removed.join('・') || 'なし'} → ${added.join('・') || 'なし'}`, before: removed.join('・') || 'なし', after: added.join('・') || 'なし', note: 'オプションから部品を逆引き', affected: parts.filter((p) => p.optNames.some((o) => added.includes(o) || removed.includes(o))).map((p) => p.code) });
+    if (added.length || removed.length) changes.push({ kind: '仕様変更', title: `${removed.join('・') || 'なし'} → ${added.join('・') || 'なし'}`, note: '', affected: parts.filter((p) => p.optNames.some((o) => added.includes(o) || removed.includes(o))).map((p) => p.code) });
   }
-  const excess = parts.filter((p) => p.excess > 0).map((p) => ({ code: p.code, name: p.name, maker: p.maker, excess: p.excess, poDate: p.poDate, amount: p.excess * p.price, option: p.option }));
-
-  return { ...f, parts, changes, excess, actions: [] };
+  const excess = parts.filter((p) => p.excess > 0).map((p) => ({ code: p.code, name: p.name, maker: p.maker, excess: p.excess, poDate: p.poDate, amount: p.excess * p.price }));
+  return { ...f, parts, changes, excess, todos: [] };
 }
 
-function buildActions(f, parts, changes, excess, base) {
+// やること（1件 = 1行で言えること）。文面は頼まれたときだけ開く
+function buildTodos(f, base) {
   const { sep } = f.versions;
   const out = [];
-  const lateOrders = parts.filter((p) => p.short > 0 && p.late > 0);
-  const orders = parts.filter((p) => p.short > 0);
-  const byMaker = groupBy(orders, (p) => p.maker);
-  for (const [maker, list] of byMaker) {
-    const lines = list.map((p) => `・${p.code} ${p.name}：${p.order}個（${p.late > 0 ? `希望納期 ${md(sep.due)} に対し入手見込み ${md(p.eta)}、${p.late}日遅れの見込み。短縮の可否をご確認ください` : `入手見込み ${md(p.eta)}`}）`);
-    out.push({ to: `${maker} 営業ご担当`, kind: 'メーカーへの手配・納期確認', subject: `【手配・納期確認】${f.name}向け 部品`, body: `${maker} 営業ご担当者様\n\nいつもお世話になっております。${OUR_NAME}です。\n${CUSTOMER}様の「${f.name}」向けに、下記の手配をお願いします。\n\n${lines.join('\n')}\n\n納期の短縮が可能な場合、最短の納期をお知らせください。\nよろしくお願いいたします。` });
+  const sign = `${OUR_NAME}です。`;
+  const openers = (to) => `${to}\n\nいつもお世話になっております。${sign}\n`;
+  // メーカーへ: 手配（遅れるなら短縮も聞く）
+  for (const p of f.parts.filter((x) => x.short > 0)) {
+    out.push({
+      tone: p.late > 0 ? 'red' : p.urgent ? 'amber' : 'blue', kind: 'メーカーに連絡', who: p.maker,
+      what: `${p.name} ${p.order}個を手配`,
+      sub: p.late > 0 ? `${md(sep.due)} に ${p.late}日遅れ → 短縮できるか聞く` : p.urgent ? `締切 ${md(p.deadline)}${p.deadline < base ? '（過ぎている）' : ''}` : `${md(p.eta)} に届く`,
+      code: p.code, why: p.why,
+      draft: { subject: `【手配】${p.code} ${p.name} ${p.order}個`, body: `${openers(`${p.maker} 営業ご担当者様`)}${CUSTOMER}様「${f.name}」向けに、下記をお願いします。\n\n・${p.code} ${p.name}：${p.order}個\n${p.late > 0 ? `\n希望納期 ${md(sep.due)} に対し、御社納期では ${md(p.eta)} 着の見込みです。短縮が可能でしたら最短の納期をお知らせください。` : `\n納期は ${md(p.eta)} 着で承知しています。`}\n\nよろしくお願いいたします。` },
+    });
   }
-  if (lateOrders.length) {
-    out.push({ to: `${CUSTOMER} 購買ご担当`, kind: 'お客様への納期ご相談', subject: `【納期ご相談】${f.name}（${md(sep.date)} 内示分）`, body: `${CUSTOMER} 購買ご担当者様\n\nいつもお世話になっております。${OUR_NAME}です。\n${md(sep.date)} 付の内示（${f.name}）について、下記の部品はメーカーの納期から、希望納期 ${md(sep.due)} に間に合わない見込みです。\n\n${lateOrders.map((p) => `・${p.code} ${p.name}：入手見込み ${md(p.eta)}（${p.late}日遅れ）`).join('\n')}\n\n分納、または納期のご相談をさせていただけないでしょうか。\nよろしくお願いいたします。` });
+  // メーカーへ: 頼み済み分の入荷が遅い
+  for (const p of f.parts.filter((x) => x.short === 0 && x.late > 0)) {
+    out.push({
+      tone: 'red', kind: 'メーカーに連絡', who: p.maker, what: `${p.name} 頼み済み ${p.po}個の入荷を早められるか聞く`, sub: `${md(p.poDate)} 入荷 → ${p.late}日遅れ`, code: p.code, why: p.why,
+      draft: { subject: `【納期前倒しのご相談】${p.code} ${p.name}`, body: `${openers(`${p.maker} 営業ご担当者様`)}発注済みの ${p.code} ${p.name} ${p.po}個（入荷予定 ${md(p.poDate)}）について、${md(sep.due)} までに入荷できないかご相談です。\n\n可能な最短の納期をお知らせください。よろしくお願いいたします。` },
+    });
   }
-  if (excess.length) {
-    out.push({ to: '社内（購買・営業）', kind: '過剰になる発注残の扱い', subject: `【要判断】${f.name} 不要になる発注残 ${excess.length}件`, body: `${f.name}（${changes.map((c) => c.title).join('、')}）により、下記の発注残が不要になる見込みです。\n\n${excess.map((e) => `・${e.code} ${e.name}：発注残 ${e.excess}個（入荷予定 ${md(e.poDate)}、約${man(e.amount)}万円）${e.transfer?.length ? ` → ${e.transfer.map((t) => `「${t.folderName}」で ${t.short}個不足。振替候補`).join('／')}` : ''}`).join('\n')}\n\nキャンセル可否をメーカーに確認するか、他案件へ振り替えるかをご判断ください。` });
+  // お客様へ: 間に合わない
+  const lateParts = f.parts.filter((x) => x.late > 0);
+  if (lateParts.length) {
+    out.push({
+      tone: 'red', kind: 'お客様に連絡', who: CUSTOMER, what: `${md(sep.due)} に間に合わない部品 ${lateParts.length}点 → 納期を相談`, sub: lateParts.map((p) => `${p.name} ${p.late}日`).join('、'), code: '', why: lateParts.flatMap((p) => [`■ ${p.code} ${p.name}`, ...p.why.slice(-2)]),
+      draft: { subject: `【納期ご相談】${f.name}`, body: `${openers(`${CUSTOMER} 購買ご担当者様`)}${md(sep.date)} 付の内示（${f.name}）について、下記はメーカー納期の都合で希望日 ${md(sep.due)} に間に合わない見込みです。\n\n${lateParts.map((p) => `・${p.code} ${p.name}：${md(p.eta)} 着（${p.late}日遅れ）`).join('\n')}\n\n分納、または納期のご相談をさせていただけないでしょうか。よろしくお願いいたします。` },
+    });
   }
-  const checks = (f.reading || []).filter((r) => r.check);
-  if (checks.length) {
-    out.push({ to: `${CUSTOMER} 購買ご担当`, kind: '内示の記載の確認', subject: `【ご確認】${f.name} 内示の記載について`, body: `${CUSTOMER} 購買ご担当者様\n\nいつもお世話になっております。${OUR_NAME}です。\n${md(sep.date)} 付の内示（${f.name}）について、下記をご確認させてください。\n\n${checks.map((r) => `・${r.value}`).join('\n')}\n\nお手数ですが、ご回答をお願いいたします。` });
+  // 社内: 余る分
+  for (const e of f.excess) {
+    const t = e.transfer?.[0];
+    out.push({
+      tone: 'amber', kind: '社内で決める', who: '購買・営業', what: `${e.name} 頼み済み ${e.excess}個が余る`, sub: t ? `「${t.folderName}」で ${t.short}個足りない → 回せる` : `約${man(e.amount)}万円 → キャンセルできるか聞く`, code: e.code,
+      why: [`前回は使う予定だった（${f.changes.map((c) => c.title).join('、')}）`, `頼み済み ${e.excess}個・入荷 ${md(e.poDate)}・約${man(e.amount)}万円`, t ? `${t.folderName} で同じ型番が ${t.short}個足りない` : 'ほかの案件で使う予定なし'],
+      draft: { subject: `【要判断】${e.code} ${e.name} 頼み済み ${e.excess}個の扱い`, body: `${f.name}（${f.changes.map((c) => c.title).join('、')}）により、${e.code} ${e.name} の頼み済み ${e.excess}個（入荷 ${md(e.poDate)}、約${man(e.amount)}万円）が不要になります。\n\n${t ? `「${t.folderName}」で同じ型番が ${t.short}個足りないため、そちらへ回すことを提案します。` : 'メーカーにキャンセル可否を確認するか、在庫として持つかをご判断ください。'}` },
+    });
   }
-  void base;
-  return out;
+  // お客様へ: 内示の読み取りで確かめること
+  for (const r of (f.reading || []).filter((x) => x.check)) {
+    out.push({
+      tone: 'blue', kind: 'お客様に確認', who: CUSTOMER, what: r.ask || r.value, sub: r.value, code: '', why: [`内示の記載: ${r.value}`, `読み取り元: ${r.from}`],
+      draft: { subject: `【ご確認】${f.name} 内示の記載`, body: `${openers(`${CUSTOMER} 購買ご担当者様`)}${md(sep.date)} 付の内示（${f.name}）について、1点ご確認させてください。\n\n・${r.value}\n\nお手数ですが、ご回答をお願いいたします。` },
+    });
+  }
+  const order = { red: 0, amber: 1, blue: 2 };
+  return out.sort((a, b) => order[a.tone] - order[b.tone]);
 }
 
 // ---------- 画面向け ----------
@@ -207,85 +235,69 @@ export function getDemoData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
   const selected = b.folders.find((f) => f.id === folder) || null;
   const active = b.folders.filter((f) => !f.pending);
   const scope = selected ? [selected] : active;
-  const rows = scope.flatMap((f) => f.parts.map((p) => ({ ...p, base, folderId: f.id, folderName: f.name, due: f.versions.sep.due, qty: f.versions.sep.qty })));
-  const urgent = rows.filter((p) => p.urgent).sort((a, c) => cmp(a.deadline, c.deadline));
-  const late = rows.filter((p) => p.late > 0).sort((a, c) => c.late - a.late);
-  const changes = scope.flatMap((f) => f.changes.map((c) => ({ ...c, folderId: f.id, folderName: f.name, affectedRows: c.affected.map((code) => rows.find((r) => r.folderId === f.id && r.code === code)) })));
-  const excess = scope.flatMap((f) => f.excess.map((e) => ({ ...e, folderId: f.id, folderName: f.name })));
-  const actions = scope.flatMap((f) => f.actions.map((a) => ({ ...a, folderId: f.id, folderName: f.name })));
+  const rows = scope.flatMap((f) => f.parts.map((p) => row(p, f, base)));
+  const toneOrder = { red: 0, amber: 1, blue: 2 };
+  const todos = scope.flatMap((f) => f.todos.map((t, i) => ({ ...t, id: `${f.id}-${i}`, folderId: f.id, folderName: f.name }))).sort((a, c) => toneOrder[a.tone] - toneOrder[c.tone]);
+  const changes = scope.flatMap((f) => f.changes.map((c) => ({
+    kind: c.kind, title: c.title, note: c.note, folderId: f.id, folderName: f.name,
+    affected: c.affected.map((code) => rows.find((r) => r.folderId === f.id && r.code === code)).filter(Boolean),
+    excess: f.excess.filter((e) => c.affected.includes(e.code) || c.kind === '取消').map((e) => ({ ...e, amountMan: man(e.amount), poDateLabel: md(e.poDate), transfer: (e.transfer || []).map((t) => `「${t.folderName}」で ${t.short}個足りない → 回せる`) })),
+  })));
+  const readings = scope.filter((f) => !f.pending).map((f) => ({
+    folderId: f.id, folderName: f.name, date: md(f.versions.sep.date),
+    chips: [
+      { label: '台数', value: f.versions.sep.qty ? `${f.versions.sep.qty}台` : '取消', changed: f.versions.sep.qty !== f.versions.aug.qty },
+      { label: '希望日', value: md(f.versions.sep.due), changed: f.versions.sep.due !== f.versions.aug.due },
+      { label: '仕様', value: f.versions.sep.options.join('・') || '標準', changed: f.versions.sep.options.join() !== f.versions.aug.options.join() },
+      { label: '確かめること', value: `${(f.reading || []).filter((r) => r.check).length}件`, changed: (f.reading || []).some((r) => r.check) },
+    ],
+    checks: (f.reading || []).filter((r) => r.check).map((r) => r.ask || r.value),
+  }));
 
   return {
-    title: 'ACS株式会社様 在庫・内示モック',
-    subtitle: '内示の版を置くだけで、変更点・影響部品・手配の急ぎ順が表になります。AI は読み取りと文面の下書きだけで、数字は計算しません。',
-    base, baseLabel: md(base), baseOptions: BASE_DATES, urgentUntil: md(b.urgentUntil),
-    baseNote: base === DEFAULT_BASE
-      ? `基準日は ${md(base)}（9月版の内示を受け取った日）の想定です。「期限を過ぎた」は、その日の時点で発注期限を過ぎていた部品です。`
-      : `基準日を ${md(base)}（今日）にして見ています。9/25 に発注していない前提なので、入手見込みが ${daysBetween(DEFAULT_BASE, base)}日後ろにずれ、遅れが増えます。`,
-    footNote: '数量・単価・会社名・担当者名・型番はすべて架空のデモデータです。計算は「計算の決まり v1」のとおり機械的に行い、AI は計算しません。',
+    title: '内示チェック',
+    asOf: md(base), base, baseOptions: BASE_DATES,
+    footNote: '架空データ',
     selectedFolder: selected ? selected.id : 'all',
-    defaultTab: 'changes',
+    defaultTab: 'todo',
     tabs: [
-      { id: 'changes', label: '内示の変更点', count: changes.length },
-      { id: 'urgent', label: '手配を急ぐ部品', count: urgent.length },
-      { id: 'late', label: '納期の遅れ', count: late.length },
-      { id: 'folders', label: 'フォルダ', count: b.folders.length },
-      { id: 'rules', label: '計算の決まり', count: RULES.length },
-      { id: 'reading', label: 'AI の読み取り', count: scope.reduce((s, f) => s + (f.reading || []).filter((r) => r.check).length, 0) },
+      { id: 'todo', label: 'やること', count: todos.length },
+      { id: 'changes', label: '内示の変わった点', count: changes.length },
+      { id: 'parts', label: '部品の一覧', count: rows.length },
     ],
     folders: b.folders.map((f) => ({
       id: f.id, customer: f.customer, name: f.name, model: f.model, pending: f.pending || '',
-      status: f.pending ? '9月版 未受領' : f.changes.map((c) => c.kind).join('・') || '変更なし',
-      urgent: f.parts.filter((p) => p.urgent).length, late: f.parts.filter((p) => p.late > 0).length,
-      versions: f.pending ? null : { aug: { ...f.versions.aug, dueLabel: md(f.versions.aug.due) }, sep: { ...f.versions.sep, dueLabel: md(f.versions.sep.due) } },
+      status: f.pending ? '今回の内示 未着' : f.changes.length ? f.changes.map((c) => c.kind).join('・') : '変更なし',
+      red: f.todos.filter((t) => t.tone === 'red').length, todos: f.todos.length,
     })),
-    summary: {
-      urgent: urgent.length, late: late.length, changes: changes.length, excess: excess.length,
-      excessAmount: Math.round(sum(excess.map((e) => e.amount)) / 10000),
-    },
-    urgent: urgent.map(row),
-    late: late.map(row),
-    changes: changes.map((c) => ({ kind: c.kind, title: c.title, before: c.before, after: c.after, note: c.note, folderId: c.folderId, folderName: c.folderName, affected: c.affectedRows.map(row) })),
-    excess: excess.map((e) => ({ ...e, amountMan: man(e.amount), poDateLabel: md(e.poDate), transfer: (e.transfer || []).map((t) => `「${t.folderName}」で ${t.short}個 不足 → 振替候補`) })),
-    actions,
+    todos: todos.map((t) => ({ ...t, draft: t.draft })),
+    changes,
+    readings,
+    parts: rows,
     rules: RULES,
-    reading: scope.map((f) => ({ folderId: f.id, folderName: f.name, items: f.reading || [] })),
     examples: suggestQuestions(selected, rows, changes),
-    aiNote: 'AI は、この画面の表に出ている数字をそのまま読み上げるだけで、計算や予測はしません。',
   };
 }
 
-function row(p) {
+function row(p, f, base) {
   return {
-    folderId: p.folderId, folderName: p.folderName, code: p.code, name: p.name, maker: p.maker, option: p.option,
-    qty: p.qty, needAug: p.needAug, needSep: p.needSep, stock: p.stock, po: p.po, poDate: p.poDate ? md(p.poDate) : '',
-    short: p.short, order: p.order, lot: p.lot, lt: p.lt, delay: p.delay,
-    eta: p.eta ? md(p.eta) : '', etaKind: p.etaKind, late: p.late, due: md(p.due),
-    deadline: p.deadline ? md(p.deadline) : '', deadlinePassed: Boolean(p.deadline) && p.deadline < p.base, urgent: p.urgent,
-    amount: man(p.order * p.price), basis: p.basis,
+    folderId: f.id, folderName: f.name, code: p.code, name: p.name, maker: p.maker, option: p.option,
+    needAug: p.needAug, needSep: p.needSep, stock: p.stock, po: p.po, poDate: md(p.poDate), have: p.have,
+    short: p.short, order: p.order, lot: p.lot, eta: md(p.eta), etaKind: p.etaKind, late: p.late, due: md(f.versions.sep.due),
+    deadline: md(p.deadline), deadlinePassed: Boolean(p.deadline) && p.deadline < base, urgent: p.urgent, excess: p.excess,
+    status: p.status, tone: p.tone, why: p.why,
   };
 }
 
-// おすすめ質問は、選択中のフォルダの表に実在する型番・数字から作る（固定文を出さない）
+// 質問例は短く、選択中の表にある型番だけ
 function suggestQuestions(selected, rows, changes) {
-  const q = [];
-  if (!selected) {
-    q.push('全案件で、手配を急ぐ部品を発注期限の早い順に読み上げてください');
-    q.push('内示の変更点を案件ごとに一言ずつまとめてください');
-    q.push('過剰になる発注残のうち、他の案件に振り替えられそうなものは？');
-    return q;
-  }
-  if (selected.pending) {
-    q.push(`「${selected.name}」で、今できることは何ですか`);
-    return q;
-  }
-  // 遅れが同じなら、今回の内示で新たに必要になった部品（オプション変更など）を優先して取り上げる
+  if (!selected) return ['遅れる部品は？', '余る部品は？', '案件ごとに一言で'];
+  if (selected.pending) return ['今できることは？'];
+  const q = ['遅れる部品は？'];
   const late = rows.filter((r) => r.late > 0).sort((a, c) => c.late - a.late || (a.needAug === 0 ? -1 : 0) - (c.needAug === 0 ? -1 : 0))[0];
-  const urgent = rows.filter((r) => r.urgent && r.code !== late?.code).sort((a, c) => c.short * c.price - a.short * a.price)[0];
-  if (changes.length) q.push(`この案件の内示の変更点（${changes.map((c) => c.kind).join('・')}）を、お客様に確認する文面にしてください`);
-  if (late) q.push(`${late.code} が ${late.late}日遅れる根拠を、式のとおりに説明してください`);
-  if (urgent) q.push(`${urgent.code} の追加手配 ${urgent.order}個の内訳を教えてください`);
-  if (selected.excess.length) q.push(`${selected.versions.sep.qty === 0 ? '取消' : '仕様変更'}で不要になる ${selected.excess[0].code} の発注残 ${selected.excess[0].excess}個は、どう扱うのがよいですか`);
-  if (!q.length) q.push('この案件で注意すべき点を、表の数字をもとに教えてください');
+  if (late) q.push(`${late.code} はなぜ遅れる？`);
+  if (changes.length) q.push('お客様への確認文');
+  if (selected.excess.length) q.push(`${selected.excess[0].code} は余る？`);
   return q.slice(0, 4);
 }
 
@@ -297,26 +309,26 @@ export function getAiData({ base = DEFAULT_BASE, folder = 'all' } = {}) {
   const scope = selected ? [selected] : b.folders.filter((f) => !f.pending);
   const partRow = (f, p) => ({
     型番: p.code, 品名: p.name, メーカー: p.maker, ...(p.option ? { オプション: p.option } : {}),
-    '8月版の必要数_個': p.needAug, '9月版の必要数_個': p.needSep, 引当済み在庫_個: p.stock, 発注残_個: p.po, ...(p.poDate ? { 発注残の入荷予定日: p.poDate } : {}),
-    不足_個: p.short, 追加手配_個: p.order, ...(p.eta ? { 入手見込み: p.eta, 入手見込みの種類: p.etaKind, 希望納期: f.versions.sep.due, 遅れ_日: p.late } : {}),
-    ...(p.deadline ? { 発注期限: p.deadline, 急ぐ: p.urgent } : {}), ...(p.excess ? { 過剰になる発注残_個: p.excess } : {}),
-    根拠: Object.values(p.basis).filter(Boolean),
+    前回いる数_個: p.needAug, 今回いる数_個: p.needSep, 在庫_個: p.stock, 頼み済み_個: p.po, ...(p.poDate ? { 頼み済み分の入荷日: p.poDate } : {}),
+    足りない数_個: p.short, 手配する数_個: p.order, ...(p.eta ? { 届く日: p.eta, 届く日の種類: p.etaKind, 希望日: f.versions.sep.due, 遅れ_日: p.late } : {}),
+    ...(p.deadline ? { 発注の締切: p.deadline, 急ぎ: p.urgent } : {}), ...(p.excess ? { 余る数_個: p.excess } : {}),
+    状態: p.status, なぜ: p.why,
   });
   return {
-    context: `FA機器商社のデモ。お客様（${CUSTOMER}、架空）から届いた内示（8月版 → 9月版）と、部品の在庫・発注残を突き合わせた結果。基準日 ${base}。${selected ? `利用者がいま開いている案件: 「${selected.name}」。質問の「この案件」はこれを指す。ほかの案件のことは聞かれたときだけ答える。` : '利用者は「全案件」を開いている。'}`,
-    note: 'すべて架空データ。数字は下の表の値をそのまま使い、新しい数字を計算しない（足し算もしない）。表に無い型番・数字は出さない。根拠を聞かれたら「根拠」の文をそのまま示す。',
-    計算の決まり_v1: Object.fromEntries(RULES.map((r) => [r.name, r.formula])),
-    急ぐの条件: `発注期限が ${b.urgentUntil} 以前`,
+    context: `FA機器商社のデモ。お客様（${CUSTOMER}、架空）から届いた内示（前回 → 今回）と、部品の在庫・頼み済み分を突き合わせた結果。今日は ${base}。${selected ? `利用者がいま開いている案件: 「${selected.name}」。質問の「この案件」はこれを指す。ほかの案件のことは聞かれたときだけ答える。` : '利用者は「すべて」を開いている。'}`,
+    note: 'すべて架空データ。数字は下の表の値をそのまま使い、新しい数字を計算しない（足し算もしない）。表に無い型番・数字は出さない。「なぜ」を聞かれたら「なぜ」の文をそのまま示す。難しい言葉を使わず、短く答える。',
+    計算のしかた: Object.fromEntries(RULES.map((r) => [r.name, r.formula])),
+    急ぎの条件: `発注の締切が ${b.urgentUntil} 以前`,
     案件: scope.map((f) => f.pending
       ? { 案件: f.name, お客様: f.customer, 状態: f.pending }
       : {
         案件: f.name, お客様: f.customer, 機種: f.model,
-        内示: { '8月版': f.versions.aug, '9月版': f.versions.sep },
-        変更点: f.changes.map((c) => ({ 種類: c.kind, 内容: c.title, 影響する型番: c.affected, 備考: c.note })),
+        内示: { 前回: f.versions.aug, 今回: f.versions.sep },
+        変わった点: f.changes.map((c) => ({ 種類: c.kind, 内容: c.title, 影響する型番: c.affected, 備考: c.note })),
         部品: f.parts.map((p) => partRow(f, p)),
-        過剰になる発注残: f.excess.map((e) => ({ 型番: e.code, 品名: e.name, 発注残_個: e.excess, 入荷予定日: e.poDate, 金額_円: e.amount, 振替候補: (e.transfer || []).map((t) => `${t.folderName}で${t.short}個不足`) })),
+        余る頼み済み分: f.excess.map((e) => ({ 型番: e.code, 品名: e.name, 余る数_個: e.excess, 入荷日: e.poDate, 金額_円: e.amount, 回せる先: (e.transfer || []).map((t) => `${t.folderName}で${t.short}個足りない`) })),
         内示からの読み取り: f.reading,
-        次のアクションの下書き: f.actions.map((a) => ({ 宛先: a.to, 種類: a.kind, 件名: a.subject })),
+        やること: f.todos.map((t) => ({ 種類: t.kind, 相手: t.who, 内容: t.what, 補足: t.sub })),
       }),
   };
 }
@@ -328,9 +340,7 @@ export { FOLDERS as _FOLDERS, PART as _PART };
 // ---------- 小道具 ----------
 function normalizeBase(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s)) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) ? String(s) : DEFAULT_BASE; }
 function sum(a) { return a.reduce((s, v) => s + v, 0); }
-function cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 function man(yen) { return (Math.round(yen / 1000) / 10).toLocaleString('ja-JP'); }
 function md(s) { return s ? `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}` : ''; }
-function groupBy(list, key) { const m = new Map(); for (const x of list) { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; }
 function addDays(s, d) { const t = new Date(`${s}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + d); return t.toISOString().slice(0, 10); }
 function daysBetween(from, to) { return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000); }

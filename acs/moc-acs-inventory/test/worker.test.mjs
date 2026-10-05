@@ -171,8 +171,9 @@ test('チャットは選択中のフォルダ・基準日のデータだけを A
   assert.equal(handled.status, 200);
   const system = fake.calls[0].body.system;
   assert.ok(system.includes('いま開いている案件: 「組立セル AS-500 導入」'));
-  assert.ok(system.includes('基準日 2026-10-06'));
+  assert.ok(system.includes('今日は 2026-10-06'));
   assert.ok(!system.includes('第2工場 外観検査ライン増設'), '他の案件のデータが混ざっている');
   assert.ok(!system.includes('KS-300'), '他の案件の型番が混ざっている');
   assert.ok(system.includes('数字は計算しません'));
+  assert.ok(system.includes('なぜ'), '「なぜ」の文を AI に渡す');
 });

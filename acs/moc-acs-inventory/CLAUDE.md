@@ -18,8 +18,8 @@ thomas 株式会社の営業が商談で見せるためのモック。案件情�
 | `src/data.js` | 架空データと計算（唯一の置き場）。`build()` が計算し、`getDemoData({base, folder})` = 画面、`getAiData({base, folder})` = AI。**両方が同じ build() の結果を使う**（AI の答えと表を食い違わせない） |
 | `src/db.js` | 保存 API `/api/records`（保存ありのモックのみ有効。SQL は必ず `moc = ?` で絞る） |
 | `src/http.js` | 書き込み系 API の共通チェック（別サイト・JSON 以外を拒否） |
-| `public/app.js` | 画面の組み立て（フォルダ／タブ／根拠ツールチップ／文面の下書き）。計算はしない |
-| `public/chat.js` `public/util.js` | チャット部品（選択中フォルダ・基準日を毎回送る）・共通の小道具 |
+| `public/app.js` | 画面の組み立て（内示を置く／案件／3 タブ／なぜ？／文面／計算のしかた）。計算はしない。**画面の文字は最小限、用語は現場の言葉**（test/spec が専門用語を検査） |
+| `public/chat.js` `public/util.js` | AI（右下から開く。選択中の案件・基準日を毎回送る）・共通の小道具 |
 | `public/` その他 | HTML/CSS。外部ライブラリなし（足す場合は cdn.jsdelivr.net / cdnjs.cloudflare.com の固定バージョンのみ）。フォントは Google Fonts |
 | `test/` | `npm test` で実行。`spec` = AI と表の一致、`insights` = 仕込んだ気づき、`render` = 全フォルダ×全タブの描画 |
 | `scripts/verify-deploy.mjs` | 公開後、未ログインで画面と API を開き、Access に飛ばされるかを確認 |
