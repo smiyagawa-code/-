@@ -23,3 +23,4 @@ thomas 株式会社の営業が商談で見せるためのモック。案件情�
 | `public/` その他 | HTML/CSS。外部ライブラリなし（足す場合は cdn.jsdelivr.net / cdnjs.cloudflare.com の固定バージョンのみ）。フォントは Google Fonts |
 | `test/` | `npm test` で実行。`spec` = AI と表の一致、`insights` = 仕込んだ気づき、`render` = 全フォルダ×全タブの描画 |
 | `scripts/verify-deploy.mjs` | 公開後、未ログインで画面と API を開き、Access に飛ばされるかを確認 |
+| `scripts/e2e-browser.mjs` | ブラウザ操作テスト（Playwright。`npm run dev` を起動して実行。AI は疑似応答） |

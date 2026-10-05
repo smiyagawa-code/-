@@ -278,12 +278,13 @@ function suggestQuestions(selected, rows, changes) {
     q.push(`「${selected.name}」で、今できることは何ですか`);
     return q;
   }
-  const late = rows.filter((r) => r.late > 0).sort((a, c) => c.late - a.late)[0];
-  const urgent = rows.filter((r) => r.urgent)[0];
+  // 遅れが同じなら、今回の内示で新たに必要になった部品（オプション変更など）を優先して取り上げる
+  const late = rows.filter((r) => r.late > 0).sort((a, c) => c.late - a.late || (a.needAug === 0 ? -1 : 0) - (c.needAug === 0 ? -1 : 0))[0];
+  const urgent = rows.filter((r) => r.urgent && r.code !== late?.code).sort((a, c) => c.short * c.price - a.short * a.price)[0];
   if (changes.length) q.push(`この案件の内示の変更点（${changes.map((c) => c.kind).join('・')}）を、お客様に確認する文面にしてください`);
   if (late) q.push(`${late.code} が ${late.late}日遅れる根拠を、式のとおりに説明してください`);
   if (urgent) q.push(`${urgent.code} の追加手配 ${urgent.order}個の内訳を教えてください`);
-  if (selected.excess.length) q.push(`取消で過剰になる ${selected.excess[0].code} の発注残は、どう扱うのがよいですか`);
+  if (selected.excess.length) q.push(`${selected.versions.sep.qty === 0 ? '取消' : '仕様変更'}で不要になる ${selected.excess[0].code} の発注残 ${selected.excess[0].excess}個は、どう扱うのがよいですか`);
   if (!q.length) q.push('この案件で注意すべき点を、表の数字をもとに教えてください');
   return q.slice(0, 4);
 }
