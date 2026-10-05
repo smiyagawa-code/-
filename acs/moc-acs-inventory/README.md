@@ -3,11 +3,11 @@
 | 項目 | 内容 |
 |---|---|
 | Worker 名 | `moc-acs-inventory` |
-| 公開 URL | https://moc-acs-inventory.thomas-gra.workers.dev/ |
+| 公開 URL | https://moc-acs-inventory.thomas-gr.workers.dev/ |
 | 担当 | 宮川 |
 | 商談日 | 2026-10-06 |
 | 共有先 | 社内のみ（Cloudflare Access） |
-| 状態 | 作り直し版 完成（10/5 レビューの A・B を織り込み）。テスト 42件＋ブラウザ操作 57件 通過。**未公開**（公開は手元 PC から） |
+| 状態 | **公開中**。テスト 42件＋ブラウザ操作 57件 通過。公開版で AI の答えを表と照合済み（合格） |
 
 ## このフォルダの中身
 
