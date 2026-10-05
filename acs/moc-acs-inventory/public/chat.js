@@ -1,5 +1,5 @@
 // AI チャット（/api/chat）。選択中のフォルダと基準日を毎回いっしょに送る（AI は画面と同じ表だけを見る）。
-// 返答は先にエスケープしてから、箇条書き・太字・小見出しだけ整える。
+// 返答は先にエスケープしてから、箇条書き・太字・小見出し・表だけ整える。
 import { esc } from './util.js';
 
 const MAX_MESSAGES = 20; // サーバーの上限と同じ（10往復）
@@ -81,23 +81,38 @@ export async function ask(text) {
   }
 }
 
-function renderReply(text) {
+export function renderReply(text) {
   const blocks = [];
   let list = null;
+  let table = null; // 「| a | b |」の行が続く間は 1 つの表にまとめる（行の間の空行は無視）
+  const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   for (const raw of esc(text).split('\n')) {
     const line = raw.trim();
-    const bold = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    if (/^\|.*\|$/.test(line)) {
+      list = null;
+      if (!table) { table = []; blocks.push(table); }
+      if (!/^\|[\s:|-]+\|$/.test(line)) table.push(line.slice(1, -1).split('|').map((c) => bold(c.trim())));
+      continue;
+    }
+    if (!line) { list = null; continue; }
+    table = null;
     if (/^[-・•]\s*/.test(line) && line.length > 1) {
       if (!list) { list = []; blocks.push(list); }
       list.push(bold(line.replace(/^[-・•]\s*/, '')));
       continue;
     }
     list = null;
-    if (!line) continue;
     if (/^(#+\s*)?(データから言えること|確かめるべきこと|確認すべきこと|担当の方に確かめること|まとめ|件名|本文)[:：]?$/.test(line)) blocks.push(`<p class="h">${line.replace(/^#+\s*/, '')}</p>`);
     else blocks.push(`<p>${bold(line.replace(/^#+\s*/, ''))}</p>`);
   }
-  return blocks.map((b) => (Array.isArray(b) ? `<ul>${b.map((li) => `<li>${li}</li>`).join('')}</ul>` : b)).join('');
+  return blocks.map((b) => {
+    if (typeof b === 'string') return b;
+    if (Array.isArray(b[0])) {
+      const [head, ...rows] = b;
+      return `<div class="tbl"><table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    }
+    return `<ul>${b.map((li) => `<li>${li}</li>`).join('')}</ul>`;
+  }).join('');
 }
 
 function addMsg(kind, html) {

@@ -56,7 +56,7 @@ button.link.small { font-size: 11.5px; color: var(--muted); }
 .f-cust { font-size: 10.5px; color: var(--muted); }
 .f-name { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
 .f-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-.pill { display: inline-block; font-style: normal; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--ink-2); white-space: nowrap; }
+.pill { display: inline-block; font-style: normal; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--ink-2); }
 .pill.red { background: #FDECEE; color: var(--bad); }
 .pill.amber { background: #FFF4DF; color: var(--amber); }
 .pill.blue { background: #E8F1FC; color: var(--blue); }
@@ -82,7 +82,7 @@ button.link.small { font-size: 11.5px; color: var(--muted); }
 .todo .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--blue); }
 .todo.red .dot { background: var(--bad); } .todo.amber .dot { background: #E9A23B; }
 .todo-main { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 15px; }
-.todo-main .who { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.todo-main .who { font-size: 12.5px; color: var(--ink-2); }
 .todo-main b { font-weight: 700; }
 .todo-sub { font-size: 12.5px; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .todo.red .todo-sub { color: var(--bad); }
@@ -160,6 +160,13 @@ tr.hot[data-why-row]:hover td { background: #FFE9D8; }
 .msg.assistant ul { margin: 6px 0 0; padding-left: 1.2em; }
 .msg.assistant strong { color: var(--navy); }
 .msg.assistant .h { font-weight: 700; color: var(--navy); margin-top: 10px; }
+.msg.assistant:has(.tbl) { max-width: 100%; width: 100%; }
+.msg.assistant .tbl { overflow-x: auto; margin: 8px -4px 0; padding: 0 4px; }
+.msg.assistant .tbl + * { margin-top: 8px; }
+.msg.assistant table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.45; }
+.msg.assistant th, .msg.assistant td { padding: 5px 6px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.msg.assistant th:last-child, .msg.assistant td:last-child { white-space: normal; } /* 型番・日付は折らず、最後の列（備考など）だけ折り返す。入りきらなければ横にスクロール */
+.msg.assistant th { font-size: 11px; font-weight: 600; color: var(--ink-2); }
 .msg.error { align-self: flex-start; background: #FDECEE; color: var(--bad); }
 .typing { display: inline-flex; gap: 4px; align-items: center; height: 18px; }
 .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite ease-in-out; }
