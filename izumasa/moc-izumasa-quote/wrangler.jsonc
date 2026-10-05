@@ -1,0 +1,45 @@
+{
+  // 営業モック（イズマサ様 / 見積回答モック）
+  // 担当: 宮川 / 作成: 2026-10-05（作り直し版） / 終了予定: 2026-10-31
+  "name": "moc-izumasa-quote",
+  // 公開先は会社の Cloudflare アカウントに固定（自分のアカウントに公開されないように。秘密ではない）
+  "account_id": "8086c160482e013b14b9a6358fcce749",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+
+  // 画面（public/）も必ず Worker を通す。外すと画面が認証チェックなしで配信される（絶対に外さない）
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+
+  // 認証は Cloudflare Access（ダッシュボードで設定）。パスワードをこのファイルに書かない。
+  // Worker は ctx.access か Access の署名付きトークン（下の ACCESS_* で検証）でログイン済みを確かめる。
+  // dev ブロックは `wrangler dev` のときだけ使われる「ログイン済みの疑似ユーザー」。
+  "access": {
+    "dev": {
+      "aud": "local-dev",
+      "identity": { "email": "dev@thomas-gr.com" }
+    }
+  },
+
+  // AI チャットの API キーは会社共通の Secrets Store から読む（値は営業には見えない）
+  "secrets_store_secrets": [
+    {
+      "binding": "ANTHROPIC_API_KEY",
+      "store_id": "f143c01c3cbb4957b68385e9e638f29c",
+      "secret_name": "anthropic-api-key-moc"
+    }
+  ],
+
+  "vars": {
+    // Access のトークン検証用（秘密ではない）。値は config.json から入る
+    "ACCESS_TEAM_DOMAIN": "icy-surf-e492.cloudflareaccess.com",
+    "ACCESS_AUD": "3a0ea013eb532a8065ada62cf206ed58c02b8a7600d475ed7326dc3f6f2d3f31",
+    "MOC_NAME": "moc-izumasa-quote",
+    "MOC_TITLE": "イズマサ様 見積回答モック",
+    "AI_MODEL": "claude-opus-5",
+    "AI_EFFORT": "medium"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "moc-izumasa-quote",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "イズマサ様 見積回答モック（営業モック・架空データ / Cloudflare Workers）",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "node --test test/*.test.mjs",
+    "predeploy": "npm test",
+    "deploy": "wrangler deploy",
+    "verify": "node scripts/verify-deploy.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "jose": "^6.2.12"
+  },
+  "devDependencies": {
+    "wrangler": "^4.139.0"
+  }
+}
