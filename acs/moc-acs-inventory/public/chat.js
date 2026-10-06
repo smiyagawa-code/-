@@ -61,7 +61,7 @@ export async function ask(text) {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: history, folder: context.folder, base: context.base, ...(context.csv ? { csv: context.csv } : {}), ...(context.overrides && Object.keys(context.overrides).length ? { overrides: context.overrides } : {}) }),
+      body: JSON.stringify({ messages: history, folder: context.folder, base: context.base, ...(context.csv ? { csv: context.csv } : {}), ...(context.overrides && Object.keys(context.overrides).length ? { overrides: context.overrides } : {}), ...(context.folders?.length ? { folders: context.folders } : {}) }),
     });
     const body = await res.json().catch(() => ({}));
     pending.remove();

@@ -162,12 +162,56 @@ function isoDate(s) {
   return Number.isNaN(Date.parse(`${d}T00:00:00Z`)) ? '' : d;
 }
 // CSV の行を案件に当てはめる（機種 → 案件名 の順で照合）。当てはまった案件は「今回の内示」を CSV の値に差し替える
-function applyCsv(rows) {
+// 内示の行をどの案件に当てはめるか: 案件名が同じもの → 機種が同じものが 1 つだけならそれ（同じ機種の案件が複数あるときは案件名で）
+export function findFolder(r, folders = FOLDERS) {
+  if (r.name) { const byName = folders.find((x) => x.name === r.name && (!x.pending || x.user)); if (byName) return byName; }
+  if (r.model) { const byModel = folders.filter((x) => !x.pending && x.model === r.model); if (byModel.length === 1) return byModel[0]; }
+  return null;
+}
+
+// 画面で作った案件（得意先・案件名・機種・内示）。部品表（bom）は同じ機種の既存の案件から流用する。引き当て済みの在庫・発注残は無し
+const MAX_USER_FOLDERS = 20;
+export function normalizeFolders(raw) {
+  if (!Array.isArray(raw)) return [];
+  const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const out = [];
+  for (const u of raw.slice(0, MAX_USER_FOLDERS)) {
+    if (!u || typeof u !== 'object') continue;
+    const customer = str(u.customer, 60), name = str(u.name, 80), model = str(u.model, 40);
+    if (!customer || !name || !model) continue;
+    const qty = Number.isInteger(u.qty) && u.qty >= 0 && u.qty <= 9999 ? u.qty : null;
+    const due = isoDate(str(u.due, 20)), date = isoDate(str(u.date, 20));
+    const options = Array.isArray(u.options) ? u.options.map((o) => str(o, 40)).filter(Boolean).slice(0, 10) : [];
+    out.push({ id: `u${out.length + 1}`, customer, name, model, qty, due, date, options, note: str(u.note, 200) });
+  }
+  return out;
+}
+export function folderList(extra) {
+  const users = normalizeFolders(extra).map((u) => {
+    const tpl = FOLDERS.find((f) => !f.pending && f.model === u.model);
+    const base = { id: u.id, customer: u.customer, name: u.name, model: u.model, user: true, registered: u.date };
+    if (!tpl) return { ...base, pending: `機種 ${u.model} の部品表がまだありません（読み替えルールの登録が要ります）` };
+    if (u.qty == null || !u.due) return { ...base, pending: '内示を待っています（案件は登録済み）', bom: tpl.bom, alloc: {} };
+    const sep = { date: u.date || DEFAULT_BASE, qty: u.qty, due: u.due, options: u.options, note: u.note };
+    return { ...base, bom: tpl.bom, alloc: {}, versions: { aug: sep, sep }, reading: readingFromRegistration(sep) };
+  });
+  return users.length ? [...FOLDERS, ...users] : FOLDERS;
+}
+function readingFromRegistration(v) {
+  return [
+    { field: '台数', value: `${v.qty}台`, from: '案件の登録', check: false },
+    { field: '希望日', value: v.due, from: '案件の登録', check: false },
+    { field: '仕様', value: v.options.join('・') || '標準', from: '案件の登録', check: false },
+    ...(v.note ? [{ field: '備考', value: `「${v.note}」`, from: '案件の登録', check: false }] : []),
+  ];
+}
+
+function applyCsv(rows, folders = FOLDERS) {
   const matched = [], unmatched = [];
   const over = {};
   for (const r of rows) {
-    const f = FOLDERS.find((x) => (r.model && x.model === r.model) || x.name === r.name);
-    if (!f || f.pending) { unmatched.push(r); continue; }
+    const f = findFolder(r, folders);
+    if (!f || (f.pending && !f.user)) { unmatched.push(r); continue; }
     over[f.id] = r;
     matched.push({ folderId: f.id, name: f.name, line: r.line });
   }
@@ -191,17 +235,23 @@ function readingFromCsv(f, r) {
 
 // ---------- 計算（ここだけ） ----------
 // overrides = 画面の「設定」で直した値（検証済み。src/masters.js の normalizeOverrides）。部品カタログと案件の部品表に当ててから計算する
-function build(base = DEFAULT_BASE, csvRowsIn = null, overrides = null) {
-  const { over, matched, unmatched } = csvRowsIn ? applyCsv(csvRowsIn) : { over: {}, matched: [], unmatched: [] };
+function build(base = DEFAULT_BASE, csvRowsIn = null, overrides = null, extraFolders = null) {
+  const ALL = folderList(extraFolders);
+  const { over, matched, unmatched } = csvRowsIn ? applyCsv(csvRowsIn, ALL) : { over: {}, matched: [], unmatched: [] };
   const catalog = overrides?.parts ? Object.fromEntries(Object.entries(PART).map(([code, p]) => [code, { ...p, ...(overrides.parts[code] || {}) }])) : PART;
   const withCsv = (f) => {
     const r = over[f.id];
     if (!r) return f;
+    if (f.pending && f.user) { // 内示待ちで登録した案件に、初めての内示が来た（比べる前回はまだない）
+      const first = { date: r.date || base, qty: r.qty, due: r.due, options: r.options, note: r.note };
+      const { pending, ...rest } = f;
+      return { ...rest, versions: { aug: first, sep: first }, reading: readingFromCsv(f, r), fromCsv: true, firstVersion: true };
+    }
     const sep = { date: r.date || f.versions.sep.date, qty: r.qty, due: r.due || f.versions.sep.due, options: r.options, note: r.note };
     return { ...f, versions: { aug: f.versions.aug, sep }, reading: readingFromCsv(f, r), fromCsv: true };
   };
   const withBom = (f) => (overrides?.bom?.[f.id] ? { ...f, bom: overrides.bom[f.id].map((r) => (r.option ? [r.code, r.qty, r.option] : [r.code, r.qty])) } : f);
-  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(withBom(withCsv(f)), base, catalog)));
+  const folders = ALL.map(withCsv).map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(withBom(f), base, catalog)));
   // 回せる先: 余った頼み済み分と同じ型番が、ほかの案件で足りない
   for (const f of folders) {
     for (const ex of f.excess) {
@@ -334,10 +384,10 @@ function buildTodos(f, base, suppliers = {}) {
 }
 
 // ---------- 画面向け ----------
-export function getDemoData({ base = DEFAULT_BASE, folder = 'all', csv = null, overrides = null } = {}) {
+export function getDemoData({ base = DEFAULT_BASE, folder = 'all', csv = null, overrides = null, folders = null } = {}) {
   base = normalizeBase(base);
   overrides = normalizeOverrides(overrides);
-  const b = build(base, normalizeCsv(csv), overrides);
+  const b = build(base, normalizeCsv(csv), overrides, folders);
   const mastersDefault = getDefaultMasters();
   const selected = b.folders.find((f) => f.id === folder) || null;
   const active = b.folders.filter((f) => !f.pending);
@@ -414,9 +464,9 @@ function suggestQuestions(selected, rows, changes) {
 }
 
 // ---------- AI 向け（画面と同じ build() の結果。選択中のフォルダだけを渡す） ----------
-export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null, overrides = null } = {}) {
+export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null, overrides = null, folders = null } = {}) {
   base = normalizeBase(base);
-  const b = build(base, normalizeCsv(csv), normalizeOverrides(overrides));
+  const b = build(base, normalizeCsv(csv), normalizeOverrides(overrides), folders);
   const selected = b.folders.find((f) => f.id === folder) || null;
   const scope = selected ? [selected] : b.folders.filter((f) => !f.pending);
   const partRow = (f, p) => ({
@@ -446,7 +496,7 @@ export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null, ove
 }
 
 // テスト用に計算結果をそのまま出す
-export function _build(base = DEFAULT_BASE, csv = null, overrides = null) { return build(normalizeBase(base), normalizeCsv(csv), normalizeOverrides(overrides)); }
+export function _build(base = DEFAULT_BASE, csv = null, overrides = null, folders = null) { return build(normalizeBase(base), normalizeCsv(csv), normalizeOverrides(overrides), folders); }
 
 // 画面から来る csv は「CSV の文字列」か「parseNaishiCsv の rows」。どちらでも受ける。大きすぎるものは無視
 const MAX_CSV_CHARS = 20000;

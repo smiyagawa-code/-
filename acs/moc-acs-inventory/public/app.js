@@ -5,9 +5,10 @@ import { setupIntake, openMemo } from './intake.js';
 import { openRules } from './rules.js';
 import { statusChip, onTaskClick, renderProgress, orderable, setTaskData } from './tasks.js';
 import { openOrder } from './order.js';
-import { load as storeLoad } from './store.js';
+import { load as storeLoad, save as storeSave, appendLog } from './store.js';
+import { openNewCase } from './newcase.js';
 
-const state = { folder: 'all', base: '', tab: '', csv: null, csvName: '', overrides: null, sources: [] }; // sources: 取り込んだ内示（複数可。案件ごとに後から来たものが勝つ）
+const state = { folder: 'all', base: '', tab: '', csv: null, csvName: '', overrides: null, sources: [], folders: [] }; // folders: 画面で作った案件 // sources: 取り込んだ内示（複数可。案件ごとに後から来たものが勝つ）
 let aiReady = false;
 let data = null;
 
@@ -50,6 +51,14 @@ async function init() {
   document.getElementById('settingsBtn').addEventListener('click', () => openRules({ data, overrides: state.overrides, onChange: (ov) => { state.overrides = ov; load(); } }));
   document.getElementById('memoBtn').addEventListener('click', () => openMemo({ onResult: applyCsv }));
   state.overrides = storeLoad('overrides', null);
+  state.folders = storeLoad('folders', []);
+  document.getElementById('newCaseBtn').addEventListener('click', () => openNewCase({ data, onRegister: (f) => {
+    state.folders = [...state.folders, f];
+    storeSave('folders', state.folders);
+    appendLog('case-log', { what: '案件を登録', name: `${f.customer} ${f.name}`, model: f.model });
+    state.folder = `u${state.folders.length}`; state.tab = 'changes';
+    load();
+  } }));
   setupIntake({ onResult: applyCsv, onBusy: (name) => openPop(`<div class="drop-play"><div class="spin" aria-hidden="true"></div><p id="dropStep">読み取り中…</p><p class="muted">${esc(name)}</p></div>`), onError: (msg) => openPop(`<h3>読めませんでした</h3><p class="pop-sub">${esc(msg)}</p>`) });
   await load();
 }
@@ -59,8 +68,9 @@ async function load() {
   if (state.base) qs.set('base', state.base);
   // 置かれた内示 CSV があれば、その中身ごと送って計算し直してもらう（サーバーは保存しない）
   const hasOv = state.overrides && Object.keys(state.overrides).length > 0;
-  const res = state.csv || hasOv
-    ? await fetch('/api/data', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folder: state.folder, base: state.base || undefined, csv: state.csv || undefined, overrides: hasOv ? state.overrides : undefined }) })
+  const hasFolders = state.folders.length > 0;
+  const res = state.csv || hasOv || hasFolders
+    ? await fetch('/api/data', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folder: state.folder, base: state.base || undefined, csv: state.csv || undefined, overrides: hasOv ? state.overrides : undefined, folders: hasFolders ? state.folders : undefined }) })
     : await fetch(`/api/data?${qs}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -85,7 +95,7 @@ async function load() {
   safe(() => renderTabs(), 'tabs');
   safe(() => renderPanel(), 'panel');
   setTaskData(data);
-  if (aiReady) setChatContext({ folder: state.folder, base: data.base, examples: data.examples, scopeName: selected ? selected.name : 'すべての案件', csv: state.csv, overrides: state.overrides });
+  if (aiReady) setChatContext({ folder: state.folder, base: data.base, examples: data.examples, scopeName: selected ? selected.name : 'すべての案件', csv: state.csv, overrides: state.overrides, folders: state.folders });
   writeHash();
 }
 
@@ -195,7 +205,11 @@ document.addEventListener('click', (e) => {
       <li><a href="/sample/内示_今回_2026-09-25.pdf" download>内示_今回_2026-09-25.pdf</a><small>PDF の内示書（同じ内示。手書きの希望日あり）</small></li>
       <li><a href="/sample/内示_メール本文_2026-09-25.txt" download>内示_メール本文_2026-09-25.txt</a><small>メール本文（同じ内示を文章で）</small></li>
       <li><a href="/sample/内示_電話メモ_2026-09-25.txt" download>内示_電話メモ_2026-09-25.txt</a><small>電話の走り書き（「メモ帳に転記」に貼る）</small></li>
-      <li><a href="/sample/内示_今回_修正版.csv" download>内示_今回_修正版.csv</a><small>台数・希望日を変えたもの → 表が変わる</small></li></ul>`);
+      <li><a href="/sample/内示_今回_修正版.csv" download>内示_今回_修正版.csv</a><small>台数・希望日を変えたもの → 表が変わる</small></li></ul>
+      <p class="pop-sub" style="margin-top:12px">新しい案件（第3工場 検査ライン新設）のデモ用</p><ul class="files">
+      <li><a href="/sample/内示_第3工場_初回_2026-09-30.txt" download>内示_第3工場_初回_2026-09-30.txt</a><small>電話メモ → 「案件を作る」で読み込んで登録</small></li>
+      <li><a href="/sample/内示_第3工場_2026-10-03.pdf" download>内示_第3工場_2026-10-03.pdf</a><small>その後に届いた内示書 → 作った案件に落とす</small></li>
+      <li><a href="/sample/内示_第3工場_2026-10-03.csv" download>内示_第3工場_2026-10-03.csv</a><small>同じ内示の CSV</small></li></ul>`);
     return;
   }
   const copy = e.target.closest('[data-copy]');

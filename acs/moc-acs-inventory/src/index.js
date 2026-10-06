@@ -27,7 +27,7 @@ export default {
       if (body?.csv != null && (typeof body.csv !== 'string' || body.csv.length > 20000)) return Response.json({ error: 'CSV が大きすぎます（2万文字まで）。' }, { status: 400 });
       const parsed = body?.csv ? parseNaishiCsv(body.csv) : { rows: [], errors: [] };
       if (body?.csv && !parsed.rows.length) return Response.json({ error: `CSV を読めませんでした。${parsed.errors.join('／')}` }, { status: 400 });
-      return Response.json({ ...getDemoData({ base: body?.base, folder: body?.folder, csv: body?.csv || null, overrides: body?.overrides }), csvErrors: parsed.errors });
+      return Response.json({ ...getDemoData({ base: body?.base, folder: body?.folder, csv: body?.csv || null, overrides: body?.overrides, folders: body?.folders }), csvErrors: parsed.errors });
     }
     if (url.pathname === '/api/intake' && request.method === 'POST') {
       // 内示（CSV・Excel・PDF・メール・メモ）を読み取り、CSV と同じ形に書き直して返す（保存はしない。別サイト・JSON 以外は intake.js 側で拒否）
@@ -35,7 +35,7 @@ export default {
     }
     if (url.pathname === '/api/chat' && request.method === 'POST') {
       // AI には、画面と同じ計算結果のうち「選択中のフォルダ」の分だけを渡す（画面の表と食い違わないように）。置かれた CSV も同じように反映
-      return handleChat(request, env, { data: (body) => getAiData({ base: body?.base, folder: body?.folder, csv: typeof body?.csv === 'string' && body.csv.length <= 20000 ? body.csv : null, overrides: body?.overrides }) });
+      return handleChat(request, env, { data: (body) => getAiData({ base: body?.base, folder: body?.folder, csv: typeof body?.csv === 'string' && body.csv.length <= 20000 ? body.csv : null, overrides: body?.overrides, folders: body?.folders }) });
     }
     if (url.pathname === '/api/records' || url.pathname.startsWith('/api/records/')) {
       return handleRecords(request, env, auth);

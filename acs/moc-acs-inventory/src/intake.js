@@ -15,7 +15,7 @@
 // AI キーが無いときは 503。別サイト・JSON 以外は 403（src/http.js）。
 import Anthropic from '@anthropic-ai/sdk';
 import * as XLSX from 'xlsx';
-import { _FOLDERS, _build, parseNaishiCsv } from './data.js';
+import { _FOLDERS, _build, parseNaishiCsv, folderList, findFolder as findFolderIn } from './data.js';
 import { forbiddenCrossSite, isSameOriginJson } from './http.js';
 
 export const KINDS = ['csv', 'xlsx', 'pdf', 'mail', 'memo'];
@@ -36,6 +36,8 @@ export async function handleIntake(request, env, deps = {}) {
   try { body = await request.json(); } catch { return bad('リクエストの形式が正しくありません。'); }
 
   const kind = body?.kind;
+  USER_FOLDERS = Array.isArray(body?.folders) ? body.folders : null;
+  KNOWN = folderList(USER_FOLDERS);
   if (!KINDS.includes(kind)) return bad('読める形式は CSV・Excel・PDF・メール・メモです。');
   const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim().slice(0, MAX_NAME_CHARS) : kind;
 
@@ -101,7 +103,7 @@ export async function handleIntake(request, env, deps = {}) {
 function fromCsvText(csvText, kind, name) {
   const parsed = parseNaishiCsv(csvText);
   if (!parsed.rows.length) return bad(`${kind === 'xlsx' ? 'Excel' : 'CSV'} を読めませんでした。${parsed.errors.join('／')}`);
-  const built = _build(undefined, parsed.rows);
+  const built = _build(undefined, parsed.rows, null, USER_FOLDERS);
   const label = kind === 'xlsx' ? 'Excel' : 'CSV';
   const versions = parsed.rows.map((r) => ({ ...r, folderId: findFolder(r)?.id ?? null }));
   const reading = versions.map((v) => {
@@ -167,7 +169,7 @@ const OUTPUT_SCHEMA = {
   },
 };
 function buildSystemPrompt() {
-  const known = _FOLDERS.map((f) => `- 機種 ${f.model}: ${f.name}（${f.customer}）`).join('\n');
+  const known = KNOWN.map((f) => `- 機種 ${f.model}: ${f.name}（${f.customer}）`).join('\n');
   return [
     'あなたは、お客様から届いた内示（装置の台数・納入希望日の連絡）を読み取る係です。',
     '渡された文書から、案件ごとに 案件名・機種・台数・納入希望日・内示日・得意先・仕様（オプション）・備考 を抜き出し、決められた JSON だけを返してください。',
@@ -234,8 +236,10 @@ function basicReading(v, src) {
 function noFolderItem(v, from) {
   return { field: '要確認', ask: 'この画面のどの案件ですか', value: `「${v.model || v.name || '(案件名なし)'}」に当てはまる案件がありません（機種か案件名で照合）`, from, check: true };
 }
+let KNOWN = _FOLDERS; // 画面で作った案件も含めた一覧（リクエストごとに body.folders で差し替える）
+let USER_FOLDERS = null;
 function findFolder(r) {
-  return _FOLDERS.find((x) => !x.pending && ((r.model && x.model === r.model) || (r.name && x.name === r.name))) || null;
+  return findFolderIn(r, KNOWN);
 }
 // 見本 CSV と同じ列に書き直す（数量・希望日が null なら空欄。画面で直してから確定する）
 export function toCsv(rows) {

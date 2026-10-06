@@ -10,7 +10,12 @@
   内示_今回_2026-09-25.pdf        得意先が送ってくる内示書らしい PDF 2 ページ（reportlab。日本語フォントを埋め込む）
   内示_メール本文_2026-09-25.txt  得意先担当者 → 購買部 高橋 宛のメール本文
   内示_電話メモ_2026-09-25.txt    電話で聞いた内容の走り書き（表記ゆれあり）
+  内示_第3工場_初回_2026-09-30.txt 新しい案件（第3工場 検査ライン新設）の初回の電話メモ → 案件を新しく作る用
+  内示_第3工場_2026-10-03.pdf     同じ新しい案件の内示書 PDF 1 ページ（3台・前倒し）→ 作った案件に入れる用
+  内示_第3工場_2026-10-03.csv     上の PDF と同じ内容の CSV（列順・BOM 無しは 内示_今回 CSV と同じ）
   はじめにお読みください.txt      Downloads 側にだけ置く（デモの落とす順）
+
+  python3 scripts/make-samples.py --new-only  # 新しい案件の 3 本だけ作って Downloads に足す（他は消さない）
 
 数字・文言は src/data.js の FOLDERS（株式会社大和精密製作所の 3 案件）と
 public/sample/内示_今回_2026-09-25.csv に合わせる。変えるときは両方を直すこと。
@@ -67,6 +72,16 @@ CASES = [
     },
 ]
 HEADER = ['内示日', '得意先', '案件', '機種', '数量', '納入希望日', '仕様', '備考']
+
+# 新しい案件（デモで「案件を作る → 内示を入れて変化を見せる」用）。機種は第2工場と同じ VIS-200 なので部品表を流用できる
+NEW_CASE = {
+    'name': '第3工場 検査ライン新設', 'model': 'VIS-200',
+    'doc_no': 'FC-2610-0007',                     # 架空の内示番号
+    # 初回: 9/30 の電話（内示書はまだ無い）
+    'first': {'date': '2026-09-30', 'qty': 2, 'due': '2026-12-10', 'opt': '', 'note': '予算承認は 10 月中'},
+    # 内示書: 10/3 に PDF と CSV で届く
+    'now': {'date': '2026-10-03', 'qty': 3, 'due': '2026-11-28', 'opt': 'NG排出シュート', 'note': 'ライン立ち上げを前倒し。3台目は予備機'},
+}
 
 
 def jp(d):
@@ -392,6 +407,162 @@ PDF の内示書はあとでメールで送ってくれるそう
     return True
 
 
+# ---------- 4b. 新しい案件: 初回の電話メモ ----------
+def make_new_memo(path):
+    f = NEW_CASE['first']
+    body = f"""{md(f['date'])} 10:40 大和精密 田村さんより TEL（高橋 受）
+
+新規 第3工場に検査ライン新設 とのこと（内示書はまだ）
+
+・{NEW_CASE['model']} {f['qty']}台 第3工場 検査ライン新設
+  第2工場と同じ機種 → 部品表は第2工場のを流用でよさそう
+  希望 {md(f['due'])}
+  仕様は標準（NGシュートなし）
+
+・予算承認は10月中 とのこと
+  承認おりたら内示書くれる
+
+→ 案件 新しく作っておく。部品の在庫 第2工場分とあわせて見る
+
+※ 営業デモ用の架空メモです。実在の会社・人物・取引とは関係ありません。
+"""
+    with open(path, 'w', encoding='utf-8') as f_:
+        f_.write(body)
+    return True
+
+
+# ---------- 4c. 新しい案件: 内示書 PDF（1 ページ） ----------
+def make_new_pdf(path):
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_RIGHT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError:
+        print('  [できません] reportlab が入っていないので PDF は作れません（pip は使いません）')
+        return False
+    font_name, font_path = find_font()
+    if not font_name:
+        print('  [できません] 埋め込める日本語 TrueType フォントが見つからないので PDF は作れません')
+        return False
+    ok(f'フォント: {font_name}（{font_path}）')
+
+    first, now = NEW_CASE['first'], NEW_CASE['now']
+    doc_no, issue = NEW_CASE['doc_no'], now['date']
+
+    # 体裁は make_pdf と同じ
+    navy = colors.HexColor('#1F4E78')
+    st = ParagraphStyle('b', fontName='JP', fontSize=10, leading=15)
+    st_s = ParagraphStyle('s', parent=st, fontSize=8.5, leading=12, textColor=colors.HexColor('#444444'))
+    st_r = ParagraphStyle('r', parent=st, alignment=TA_RIGHT)
+    st_h1 = ParagraphStyle('h1', parent=st, fontName='JP-B', fontSize=18, leading=26, textColor=navy)
+    st_h2 = ParagraphStyle('h2', parent=st, fontName='JP-B', fontSize=12, leading=18, textColor=navy, spaceBefore=6, spaceAfter=4)
+    st_cell = ParagraphStyle('c', parent=st, fontSize=9, leading=13)
+    st_cell_b = ParagraphStyle('cb', parent=st_cell, fontName='JP-B')
+    st_head = ParagraphStyle('hd', parent=st_cell_b, textColor=colors.white)
+    st_foot = ParagraphStyle('f', parent=st, fontSize=8, textColor=colors.grey)
+    grid = [
+        ('BACKGROUND', (0, 0), (-1, 0), navy),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#999999')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#EEF3F8')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]
+
+    story = [
+        Paragraph('内示書（フォーキャスト）', st_h1),
+        Spacer(1, 2 * mm),
+        Table([
+            [Paragraph(f'{VENDOR} 御中<br/>{RECEIVER["dept"]} {RECEIVER["name"]} 様', st),
+             Paragraph(f'内示番号: {doc_no}<br/>発行日: {jp(issue)}<br/>{CUSTOMER}<br/>{SENDER["dept"]} {SENDER["name"]}<br/>TEL {SENDER["tel"]}', st_r)],
+        ], colWidths=[95 * mm, 85 * mm], style=TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')])),
+        Spacer(1, 4 * mm),
+        Paragraph(
+            '平素よりお世話になっております。下記のとおり、新規案件の内示をご連絡いたします。'
+            f'{md(first["date"])} にお電話でお伝えした内容から変更がありますので、ご確認のうえ部品手配をお願いいたします。', st),
+        Spacer(1, 3 * mm),
+        Paragraph('1. 内示内容', st_h2),
+    ]
+    head = ['No.', '案件名', '機種', '数量', '納入希望日', '仕様', '備考']
+    rows = [[Paragraph(h, st_head) for h in head],
+            [Paragraph('1', st_cell), Paragraph(NEW_CASE['name'], st_cell), Paragraph(NEW_CASE['model'], st_cell),
+             Paragraph(str(now['qty']), st_cell_b), Paragraph(jp(now['due']), st_cell),
+             Paragraph(now['opt'] or '標準', st_cell), Paragraph(now['note'], st_cell)]]
+    t = Table(rows, colWidths=[9 * mm, 39 * mm, 17 * mm, 20 * mm, 29 * mm, 26 * mm, 40 * mm], repeatRows=1)
+    t.setStyle(TableStyle(grid))
+    story += [t, Spacer(1, 4 * mm), Paragraph(f'2. {md(first["date"])} お電話でのご連絡からの変更点', st_h2)]
+    head2 = ['項目', f'電話連絡（{md(first["date"])}）', f'今回（{md(issue)}）', '理由']
+    diffs = [
+        ('数量', str(first['qty']), str(now['qty']), '3台目は予備機'),
+        ('納入希望日', jp(first['due']), jp(now['due']), 'ライン立ち上げを前倒し'),
+        ('仕様', first['opt'] or '標準', now['opt'], '第2工場と同じ仕様にそろえる'),
+    ]
+    rows2 = [[Paragraph(h, st_head) for h in head2]]
+    for d in diffs:
+        rows2.append([Paragraph(d[0], st_cell), Paragraph(d[1], st_cell), Paragraph(d[2], st_cell_b), Paragraph(d[3], st_cell)])
+    t2 = Table(rows2, colWidths=[28 * mm, 42 * mm, 50 * mm, 60 * mm], repeatRows=1)
+    t2.setStyle(TableStyle(grid))
+    story += [t2, Spacer(1, 4 * mm), Paragraph('3. ご注意', st_h2)]
+    for s_ in [
+        '本内示は現時点の生産計画にもとづく見込みであり、注文を確約するものではありません。',
+        '数量・納期は変更になる場合があります。変更の際はあらためてご連絡します。',
+        '正式な注文書は、納入希望日の 4 週間前を目安に発行します。',
+        '予算承認は 10 月中の見込みです。承認後にあらためてご連絡します。',
+    ]:
+        story.append(Paragraph('・' + s_, st))
+    story += [
+        Spacer(1, 6 * mm),
+        Paragraph(f'お問い合わせ: {CUSTOMER} {SENDER["dept"]} {SENDER["name"]}（TEL {SENDER["tel"]} / {SENDER["mail"]}）', st_s),
+        Paragraph('※ この文書は営業デモ用の架空データです。実在の会社・人物・取引とは関係ありません。', st_foot),
+    ]
+
+    def on_page(canvas, doc):
+        canvas.saveState()
+        canvas.setFont('JP', 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawRightString(A4[0] - 15 * mm, 10 * mm, f'{doc_no}　{doc.page} / 1')
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(path, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=18 * mm,
+                            title='内示書（フォーキャスト）', author=f'{CUSTOMER} {SENDER["dept"]}', subject='営業デモ用の架空データ')
+    doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
+    return True
+
+
+# ---------- 4d. 新しい案件: 内示書と同じ内容の CSV ----------
+def make_new_csv(path):
+    """内示_今回_2026-09-25.csv と同じ: 列順は HEADER、UTF-8（BOM 無し）、LF、末尾に改行"""
+    import csv
+    now = NEW_CASE['now']
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        w = csv.writer(f, lineterminator='\n')
+        w.writerow(HEADER)
+        w.writerow([now['date'], CUSTOMER, NEW_CASE['name'], NEW_CASE['model'], now['qty'], now['due'], now['opt'], now['note']])
+    return True
+
+
+def check_new_pdf(path):
+    """新しい案件の PDF: 1 ページで、主要な語が pdftotext で読めるか"""
+    if not shutil.which('pdftotext'):
+        ok('pdftotext が無いので文字化けの自動確認はしていません（PDF を開いて目で見てください）')
+        return
+    txt = subprocess.run(['pdftotext', path, '-'], capture_output=True, text=True).stdout
+    flat = re.sub(r'\s+', '', txt)
+    musts = [CUSTOMER, VENDOR, '御中', '内示書', NEW_CASE['name'], NEW_CASE['model'], 'NG排出シュート', '3台目は予備機', NEW_CASE['doc_no']]
+    missing = [m for m in musts if re.sub(r'\s+', '', m) not in flat]   # 案件名の空白も除いて照合
+    pages = txt.count('\f')
+    if missing:
+        ok(f'[注意] pdftotext で見つからない語: {missing}')
+    else:
+        ok(f'pdftotext で主要な語をすべて確認（{pages} ページ）')
+    if shutil.which('pdffonts'):
+        fonts = subprocess.run(['pdffonts', path], capture_output=True, text=True).stdout
+        emb = [l for l in fonts.splitlines()[2:] if l.strip()]
+        ok('pdffonts: ' + '; '.join(' '.join(l.split()[:1] + l.split()[-5:-2]) for l in emb))
+
+
 # ---------- 5. はじめにお読みください ----------
 def make_readme(path):
     body = f"""ACS株式会社様 デモ用 見本ファイル（{date.today().strftime('%Y-%m-%d')} 作成）
@@ -408,6 +579,11 @@ def make_readme(path):
      ・内示_メール本文_2026-09-25.txt … メール本文（文章で変更を伝えている）
      ・内示_電話メモ_2026-09-25.txt  … 電話で聞いた走り書き（「メモ帳に転記」の欄に貼ってもよい）
   3. 内示_今回_修正版.csv            … 台数・希望日を変えたもの → 表が変わる
+
+■ 新しい案件のデモ（得意先は同じ大和精密。案件を新しく作ってから内示を入れる）
+  1. 内示_第3工場_初回_2026-09-30.txt … 電話メモ → この内容で案件を新しく作る（VIS-200 2台、希望 12/10、仕様は標準）
+  2. 内示_第3工場_2026-10-03.pdf      … 内示書 PDF（1 ページ）→ 作った案件に入れる（3台、希望 11/28、NG排出シュート）
+  3. 内示_第3工場_2026-10-03.csv      … 2 と同じ内容の CSV → 2 の代わりに入れてもよい
 
 ■ 今回分の中身（3 件とも同じ変更）
   ・VIS-200 外観検査: 2台 → 3台（3号機追加）、NG排出シュート 3台とも、希望日 11/14（手書きで「できれば 11/7」）
@@ -445,6 +621,7 @@ def check_pdf(path):
 
 def main():
     no_copy = '--no-copy' in sys.argv
+    new_only = '--new-only' in sys.argv
     os.makedirs(SAMPLE, exist_ok=True)
     made = []
     print('public/sample/ に作る')
@@ -454,14 +631,30 @@ def main():
         ('内示_メール本文_2026-09-25.txt', make_mail),
         ('内示_電話メモ_2026-09-25.txt', make_memo),
     ]
-    for name, fn in jobs:
+    new_jobs = [
+        ('内示_第3工場_初回_2026-09-30.txt', make_new_memo),
+        ('内示_第3工場_2026-10-03.pdf', make_new_pdf),
+        ('内示_第3工場_2026-10-03.csv', make_new_csv),
+    ]
+    for name, fn in (new_jobs if new_only else jobs + new_jobs):
         p = os.path.join(SAMPLE, name)
         if fn(p):
             made.append(name)
             ok(f'{name}  {os.path.getsize(p):,} bytes')
-            if name.endswith('.pdf'):
+            if name == '内示_今回_2026-09-25.pdf':
                 check_pdf(p)
+            elif name.endswith('.pdf'):
+                check_new_pdf(p)
     if no_copy:
+        return
+    if new_only:
+        print(f'{DOWNLOADS} に新しい案件の分だけ足す（他はそのまま）')
+        os.makedirs(DOWNLOADS, exist_ok=True)
+        for name in made:
+            shutil.copy2(os.path.join(SAMPLE, name), os.path.join(DOWNLOADS, name))
+        make_readme(os.path.join(DOWNLOADS, 'はじめにお読みください.txt'))
+        for f in sorted(os.listdir(DOWNLOADS)):
+            ok(f'{f}  {os.path.getsize(os.path.join(DOWNLOADS, f)):,} bytes')
         return
     print(f'{DOWNLOADS} に並べる（中身は入れ替え）')
     if os.path.isdir(DOWNLOADS):
