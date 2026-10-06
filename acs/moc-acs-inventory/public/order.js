@@ -5,7 +5,7 @@
 // app.js からは tasks.js の onTaskClick 経由で呼ばれる（行の「発注書」ボタン）。直接呼ぶなら:
 //   import { openOrder } from './order.js';  openOrder(todoItem, data, renderPanel);  // または openOrder(t, data, { onChange: renderPanel })
 import { esc } from './util.js';
-import { taskKey, setStatus, openPop, closePop } from './tasks.js';
+import { taskKey, setStatus, openPop, closePop, extraOf } from './tasks.js';
 
 const SENDER = 'ACS株式会社 購買部 高橋'; // 架空の差出人（src/data.js の文面と同じ）
 
@@ -15,8 +15,11 @@ export function buildOrder(item, d = {}, today = new Date()) {
   const folder = (d.folders || []).find((f) => f.id === item.folderId) || {};
   const maker = part.maker || item.who || '';
   const sup = findSupplier(d.masters?.suppliers, maker);
-  const qty = part.order || qtyFromText(item.what);
+  // 発注済みのあと手配数が増えていれば「追加分」: 数量は差分だけ
+  const extra = extraOf(taskKey(item), item, d);
+  const qty = extra && extra.diff > 0 ? extra.diff : part.order || qtyFromText(item.what);
   const notes = [];
+  if (extra && extra.diff > 0) notes.push(`追加分（前回 ${extra.ordered}個は発注済み${extra.eta ? `・入荷予定 ${extra.eta}` : ''}）`);
   if (part.late > 0) notes.push(`希望日 ${part.due} に対し ${part.eta} 着の見込み（${part.late}日遅れ）。短縮できる場合は最短の納期をお知らせください。`);
   else if (part.eta) notes.push(`納期 ${part.eta} 着で承知しています。`);
   const delayLine = (item.why || []).find((l) => /遅れ連絡/.test(l));
@@ -40,6 +43,7 @@ export function buildOrder(item, d = {}, today = new Date()) {
     eta: part.eta || '',
     note: notes.join('\n'),
     sender: senderFrom(item) || d.sender || SENDER,
+    extra: extra && extra.diff > 0 ? extra : null,
   };
 }
 
@@ -47,7 +51,7 @@ export function buildOrder(item, d = {}, today = new Date()) {
 export function orderText(o) {
   const line = (k, v) => `${k}：${v || ''}`;
   return [
-    '発注書（下書き）',
+    o.extra ? '追加分の発注書（下書き）' : '発注書（下書き）',
     line('発注日', o.date),
     line('発注先', o.to),
     line('ご担当', [o.contact, o.tel, o.email].filter(Boolean).join('　')),
@@ -69,7 +73,7 @@ export function openOrder(item, d, rerender) {
   if (rerender && typeof rerender === 'object') rerender = rerender.onChange;
   const o = buildOrder(item, d);
   const row = (k, v, cls = '') => `<tr><th>${esc(k)}</th><td class="${cls}">${v}</td></tr>`;
-  const pop = openPop(`<h3>発注書（下書き）</h3><p class="pop-sub">${esc(o.to)} 宛</p>
+  const pop = openPop(`<h3>${o.extra ? '追加分の発注書（下書き）' : '発注書（下書き）'}</h3><p class="pop-sub">${esc(o.to)} 宛${o.extra ? `　<em class="pill red">追加 +${o.extra.diff} 個</em>` : ''}</p>
     <div class="table-wrap"><table class="order" style="font-size:13.5px">
       <tbody>
         ${row('発注日', esc(o.date))}
@@ -85,7 +89,7 @@ export function openOrder(item, d, rerender) {
       </tbody></table></div>
     <pre id="orderText" hidden>${esc(orderText(o))}</pre>
     <div class="pop-acts" style="margin-top:12px"><button type="button" class="ghost" data-order-copy="1">コピー</button><button type="button" class="primary" data-order-done="1">発注済みにする</button></div>
-    <p class="muted">「発注済みにする」を押すと、状態が「発注済・回答待ち」になります。</p>`);
+    <p class="muted">${o.extra ? '「発注済みにする」を押すと、発注済みの数が今の手配数に更新されます。' : '「発注済みにする」を押すと、状態が「発注済・回答待ち」になります。'}</p>`);
   // 表の th を左寄せに（style.css の表は右寄せが基本）
   pop.querySelectorAll('table.order th').forEach((th) => { th.style.textAlign = 'left'; th.style.width = '92px'; th.style.whiteSpace = 'nowrap'; });
   pop.querySelectorAll('table.order td').forEach((td) => { td.style.textAlign = 'left'; td.style.whiteSpace = 'normal'; });
@@ -96,7 +100,7 @@ export function openOrder(item, d, rerender) {
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, done); else done();
   });
   pop.querySelector('[data-order-done]')?.addEventListener('click', () => {
-    setStatus(taskKey(item), '発注済・回答待ち', `発注書を出した（${o.to}・${o.qty}${o.unit}）`, item);
+    setStatus(taskKey(item), '発注済・回答待ち', `${o.extra ? '追加分の' : ''}発注書を出した（${o.to}・${o.qty}${o.unit}）`, item, d);
     closePop();
     rerender?.();
   });

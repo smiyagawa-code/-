@@ -108,12 +108,23 @@ export function setStatus(key, status, note = '', item = null, d = null) {
   const who = load('me', '担当者');
   const label = item ? itemLabel(item) : tasks[key]?.label || key;
   const remainBefore = item && d ? remainingOf(d, item.folderId) : -1;
-  tasks[key] = { status, note: note || '', at: new Date().toISOString(), who, label };
+  const prev = tasks[key] || {};
+  const rec = { status, note: note || '', at: new Date().toISOString(), who, label, ordered: prev.ordered, orderedEta: prev.orderedEta };
+  // 発注済にしたとき、そのときの手配数を ordered に残す（あとで数量が増えたら「追加 +n 個」が出る）
+  let added = 0;
+  if (item && status === '発注済・回答待ち') {
+    const cur = currentQty(item, d);
+    if (before === status && prev.ordered != null && cur > prev.ordered) added = cur - prev.ordered; // 追加発注
+    rec.ordered = cur;
+    rec.orderedEta = partOf(d, item).eta || prev.orderedEta || '';
+  }
+  tasks[key] = rec;
   save(STORE_KEY, tasks);
-  appendLog(LOG_KEY, { key, label, before, after: status, note: note || '' });
-  // 通知文の下書き（発注済・完了になったとき。案件の内示待ちが 0 になった瞬間は案件の通知も）
+  appendLog(LOG_KEY, added ? { key, label, before, after: '追加発注', note: `+${added}個（${prev.ordered} → ${rec.ordered}）${note ? '　' + note : ''}` } : { key, label, before, after: status, note: note || '' });
+  // 通知文の下書き（発注済・完了・追加発注のとき。案件の内示待ちが 0 になった瞬間は案件の通知も）
   const notices = [];
-  if (item && NOTICE_STATUSES.has(status) && before !== status) notices.push(buildNotice(item, d, status, { who, at: tasks[key].at }));
+  if (item && added) notices.push(buildNotice(item, d, '追加発注', { who, at: rec.at, added, ordered: rec.ordered }));
+  else if (item && NOTICE_STATUSES.has(status) && before !== status) notices.push(buildNotice(item, d, status, { who, at: rec.at }));
   if (item && d && remainBefore > 0) {
     const sum = progressSummary(d).find((x) => x.folderId === item.folderId);
     if (sum && sum.remaining === 0) notices.push(buildCaseNotice(folderOf(d, item.folderId), sum));
@@ -122,12 +133,28 @@ export function setStatus(key, status, note = '', item = null, d = null) {
   if (notices.length && typeof document !== 'undefined') setTimeout(() => showNotices(notices), 0); // 発注書の窓が閉じた後に出す
   return tasks[key];
 }
+function partOf(d, item) { return (d?.parts || []).find((p) => p.folderId === item.folderId && p.code === item.code) || {}; }
+// 今の手配数（parts の order。無ければ やることの文「… n個を手配」から）
+export function currentQty(item, d = lastData) { const p = partOf(d, item); return p.order || qtyFromText(item?.what); }
+// 発注済・入荷待ちのやることで、手配数が発注時（ordered）から変わったか。{ ordered, current, diff, eta }。変わっていなければ null
+export function extraOf(key, item, d = lastData) {
+  const t = allTasks()[key];
+  if (!t || t.ordered == null || !['発注済・回答待ち', '入荷待ち'].includes(t.status)) return null;
+  const current = currentQty(item, d);
+  const diff = current - t.ordered;
+  return diff ? { ordered: t.ordered, current, diff, eta: t.orderedEta || '' } : null;
+}
+export function extraBadge(key, item, d = lastData) {
+  const x = extraOf(key, item, d);
+  if (!x) return '';
+  return x.diff > 0 ? `<em class="pill red" title="発注時 ${x.ordered}個 → 今 ${x.current}個">追加 +${x.diff} 個</em>` : `<em class="pill amber" title="発注時 ${x.ordered}個 → 今 ${x.current}個">減 −${-x.diff} 個</em>`;
+}
 function remainingOf(d, folderId) { return progressSummary(d).find((x) => x.folderId === folderId)?.remaining ?? -1; }
 function folderOf(d, folderId) { return (d?.folders || []).find((f) => f.id === folderId) || { id: folderId, name: '', customer: '' }; }
 
 // ---------- 通知文（下書き。送らない） ----------
 // やること 1 件が 発注済・回答待ち／完了 になったときの文
-export function buildNotice(item, d, status, { who = load('me', '担当者'), at = new Date().toISOString() } = {}) {
+export function buildNotice(item, d, status, { who = load('me', '担当者'), at = new Date().toISOString(), added = 0, ordered = 0 } = {}) {
   const folder = folderOf(d, item.folderId);
   const part = (d?.parts || []).find((p) => p.folderId === item.folderId && p.code === item.code) || {};
   const head = `${shortName(folder.customer)} ${folder.name || item.folderName || ''}`.trim();
@@ -136,11 +163,12 @@ export function buildNotice(item, d, status, { who = load('me', '担当者'), at
   const maker = part.maker || item.who || '';
   const stamp = `（担当: ${who}、${fmtAt(at)}）`;
   let tag, line;
-  if (status === '完了') { tag = '【完了】'; line = taskType(item) === '手配' ? `${thing} が入荷し、案件に充てました${stamp}。` : `${thing} の対応が終わりました${stamp}。`; }
+  if (status === '追加発注') { tag = '【追加発注】'; line = `${item.code ? `${item.code} ${part.name || ''}`.trim() : thing} ${added}個を${maker ? `${maker}へ` : ''}追加で発注しました${stamp}。累計 ${ordered}個。${part.eta ? `追加分の入荷予定 ${part.eta}。` : ''}`; }
+  else if (status === '完了') { tag = '【完了】'; line = taskType(item) === '手配' ? `${thing} が入荷し、案件に充てました${stamp}。` : `${thing} の対応が終わりました${stamp}。`; }
   else { tag = '【発注完了】'; line = taskType(item) === '手配' ? `${thing}を${maker ? `${maker}へ` : ''}発注しました${stamp}。${part.eta ? `入荷予定 ${part.eta}。` : ''}` : `${thing} を進めました${stamp}。`; }
   const remain = d ? remainingOf(d, item.folderId) : -1;
   const body = [line, remain >= 0 ? `この案件の残り: 内示待ち ${remain} 件。` : ''].filter(Boolean).join('\n');
-  return { to: NOTICE_TO, subject: `${tag}${head} — ${thing}`, body };
+  return { to: NOTICE_TO, subject: `${tag}${head} — ${status === '追加発注' ? `${item.code} +${added}個` : thing}`, body };
 }
 // 案件の内示待ちが 0 件になったときの文（summary は progressSummary の 1 件）
 export function buildCaseNotice(folder, summary) {
@@ -183,7 +211,7 @@ function itemLabel(item) { return [item.folderName, item.code, item.what].filter
 export function statusChip(key, item) {
   if (key && typeof key === 'object') { item = key; key = taskKey(item); } // statusChip(t) でも可
   const status = getStatus(key, item);
-  return `<button type="button" class="pill ${TONE[status] || ''} status" data-task="${esc(key)}" title="押して状態を変える" style="cursor:pointer;border:0">${esc(status)}</button>`;
+  return `<button type="button" class="pill ${TONE[status] || ''} status" data-task="${esc(key)}" title="押して状態を変える" style="cursor:pointer;border:0">${esc(status)}</button>${item ? extraBadge(key, item) : ''}`;
 }
 
 // 行の中の札／「発注書」ボタンが押されたとき。app.js の onPanelClick から呼ぶ。扱ったら true
@@ -214,7 +242,7 @@ function openStatusMenu(key, item, rerender, d) {
     <p class="muted" style="margin:10px 0 6px">次へ</p>
     <div class="pop-acts">${nextStatuses(now.status).map((s) => `<button type="button" class="ghost" data-next="${esc(s)}">${esc(s)}</button>`).join('')}</div>
     <textarea id="taskNote" rows="2" maxlength="200" placeholder="メモ（任意）" style="width:100%;margin-top:12px;font:inherit;font-size:13px;border:1px solid #E6EAF0;border-radius:10px;padding:8px 10px;resize:none">${esc(now.note)}</textarea>
-    ${orderable(item) ? `<div class="pop-acts" style="margin-top:12px"><button type="button" class="primary" data-order-open="1">発注書を書く</button></div>` : ''}`);
+    ${orderable(item) && (now.status === '内示待ち' || extraOf(key, item, d)?.diff > 0) ? `<div class="pop-acts" style="margin-top:12px"><button type="button" class="primary" data-order-open="1">${extraOf(key, item, d)?.diff > 0 ? '追加分の発注書を書く' : '発注書を書く'}</button></div>` : ''}`);
   pop.querySelectorAll('[data-next]').forEach((b) => b.addEventListener('click', () => {
     setStatus(key, b.dataset.next, pop.querySelector('#taskNote')?.value?.trim() || '', item, d);
     closePop();

@@ -102,11 +102,11 @@ async function load() {
 // ---------- 左: 案件 ----------
 function renderFolders() {
   const redAll = data.folders.reduce((s, f) => s + f.red, 0);
-  const all = `<button type="button" class="folder ${state.folder === 'all' ? 'on' : ''}" data-folder="all"><span class="f-name">すべて</span><span class="f-meta">${redAll ? `<em class="pill red">${redAll}</em>` : ''}</span></button>`;
+  const all = `<button type="button" class="folder ${state.folder === 'all' ? 'on' : ''}" data-folder="all"><span class="f-name">すべて</span><span class="f-meta">${redAll ? `<em class="pill red" title="急ぐやること（遅れ・締切超過）">急ぎ ${redAll}</em>` : ''}</span></button>`;
   const list = data.folders.map((f) =>
     `<button type="button" class="folder ${state.folder === f.id ? 'on' : ''} ${f.pending ? 'pending' : ''}" data-folder="${esc(f.id)}" ${f.pending ? `title="${esc(f.pending)}"` : ''}>` +
     `<span class="f-cust">${esc(f.customer)}</span><span class="f-name">${esc(f.name)}</span>` +
-    `<span class="f-meta">${f.pending ? '<em class="pill gray">未着</em>' : `<em class="pill blue">${esc(f.status)}</em>${f.red ? `<em class="pill red">${f.red}</em>` : ''}`}</span></button>`).join('');
+    `<span class="f-meta">${f.pending ? '<em class="pill gray">未着</em>' : `<em class="pill blue">${esc(f.status)}</em>${f.red ? `<em class="pill red" title="急ぐやること（遅れ・締切超過）">急ぎ ${f.red}</em>` : ''}`}</span></button>`).join('');
   document.getElementById('folders').innerHTML = all + list;
 }
 
@@ -207,9 +207,10 @@ document.addEventListener('click', (e) => {
       <li><a href="/sample/内示_電話メモ_2026-09-25.txt" download>内示_電話メモ_2026-09-25.txt</a><small>電話の走り書き（「メモ帳に転記」に貼る）</small></li>
       <li><a href="/sample/内示_今回_修正版.csv" download>内示_今回_修正版.csv</a><small>台数・希望日を変えたもの → 表が変わる</small></li></ul>
       <p class="pop-sub" style="margin-top:12px">新しい案件（第3工場 検査ライン新設）のデモ用</p><ul class="files">
-      <li><a href="/sample/内示_第3工場_初回_2026-09-30.txt" download>内示_第3工場_初回_2026-09-30.txt</a><small>電話メモ → 「案件を作る」で読み込んで登録</small></li>
-      <li><a href="/sample/内示_第3工場_2026-10-03.pdf" download>内示_第3工場_2026-10-03.pdf</a><small>その後に届いた内示書 → 作った案件に落とす</small></li>
-      <li><a href="/sample/内示_第3工場_2026-10-03.csv" download>内示_第3工場_2026-10-03.csv</a><small>同じ内示の CSV</small></li></ul>`);
+      <li><a href="/sample/内示_第3工場_初回メール_2026-09-30.txt" download>内示_第3工場_初回メール_2026-09-30.txt</a><small>① 初回の内示メール → 「案件を作る」で読み込んで登録</small></li>
+      <li><a href="/sample/内示_第3工場_更新_電話メモ_2026-10-03.txt" download>内示_第3工場_更新_電話メモ_2026-10-03.txt</a><small>② 更新の電話メモ → 「メモ帳に転記」に貼る → 差分</small></li>
+      <li><a href="/sample/内示_第3工場_2026-10-03.pdf" download>内示_第3工場_2026-10-03.pdf</a><small>② と同じ内容の内示書 PDF</small></li>
+      <li><a href="/sample/内示_第3工場_初回_2026-09-30.txt" download>内示_第3工場_初回_2026-09-30.txt</a><small>① と同じ内容の電話メモ</small></li></ul>`);
     return;
   }
   const copy = e.target.closest('[data-copy]');
