@@ -56,7 +56,7 @@ async function init() {
     state.folders = [...state.folders, f];
     storeSave('folders', state.folders);
     appendLog('case-log', { what: '案件を登録', name: `${f.customer} ${f.name}`, model: f.model });
-    state.folder = `u${state.folders.length}`; state.tab = 'changes';
+    state.folder = `u${state.folders.length}`; state.tab = 'todo'; // 登録した案件の「やること」を開く
     load();
   } }));
   setupIntake({ onResult: applyCsv, onBusy: (name) => openPop(`<div class="drop-play"><div class="spin" aria-hidden="true"></div><p id="dropStep">読み取り中…</p><p class="muted">${esc(name)}</p></div>`), onError: (msg) => openPop(`<h3>読めませんでした</h3><p class="pop-sub">${esc(msg)}</p>`) });
