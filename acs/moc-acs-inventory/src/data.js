@@ -265,7 +265,9 @@ function build(base = DEFAULT_BASE, csvRowsIn = null, overrides = null, extraFol
 
 function buildFolder(f, base, catalog = PART) {
   const { aug, sep } = f.versions;
-  const hasOpt = (v, opt) => v.options.some((o) => o === opt || o.includes(opt) || opt.includes(o));
+  // 表記のゆれ（「NGシュート（3台とも）」と「NG排出シュート」など）は、括弧・空白・「排出」「仕様」を除いて比べる
+  const norm = (x) => String(x).replace(/（.*?）|\(.*?\)|\s|排出|仕様/g, '');
+  const hasOpt = (v, opt) => v.options.some((o) => { const a = norm(o), b = norm(opt); return a && b && (a === b || a.includes(b) || b.includes(a)); });
   const need = (v, code, opt) => (opt && !hasOpt(v, opt) ? 0 : v.qty * (f.bom.find(([c, , o]) => c === code && (o || null) === (opt || null))?.[1] ?? 0));
   const codes = [...new Set(f.bom.map(([c]) => c))];
   const parts = codes.map((code) => {
