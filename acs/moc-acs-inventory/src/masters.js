@@ -21,6 +21,15 @@ export const SUPPLIERS = [
   { maker: '北都クリーン', person: '田村 さくら', email: 'tamura@hokuto-clean.example.jp', note: '月末は締めで返事が遅い' },
 ];
 
+// 得意先の窓口（架空。やることの「お客様に連絡・確認」の行で使う）
+export const CUSTOMER_CONTACT = { maker: '株式会社大和精密製作所', person: '生産管理部 中村 由紀', email: 'nakamura.y@yamato-seimitsu.example.jp', note: '' };
+
+// メーカー名 → 窓口（overrides 適用後）。やることの contact に使う
+export function supplierLookup(overrides) {
+  const list = applyOverrides(getDefaultMasters(), overrides).suppliers;
+  return Object.fromEntries(list.map((s) => [s.maker, { maker: s.maker, person: s.person, email: s.email, note: s.note }]));
+}
+
 const LIMITS = { lt: [0, 365], lot: [1, 1000], delay: [0, 365], qty: [0, 999] };
 const MAX_TEXT = 40;
 const MAX_BOM_ROWS = 60;

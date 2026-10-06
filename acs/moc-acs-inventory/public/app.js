@@ -1,13 +1,13 @@
 // 画面の組み立て。/api/data（src/data.js の getDemoData）の結果だけを描く。計算はしない。文字は最小限。
-import { esc, fmt } from './util.js';
+import { esc, fmt, mergeCsv } from './util.js';
 import { setupChat, setChatContext, ask, openChat } from './chat.js';
 import { setupIntake, openMemo } from './intake.js';
 import { openRules } from './rules.js';
-import { statusChip, onTaskClick, renderProgress, orderable } from './tasks.js';
+import { statusChip, onTaskClick, renderProgress, orderable, setTaskData } from './tasks.js';
 import { openOrder } from './order.js';
 import { load as storeLoad } from './store.js';
 
-const state = { folder: 'all', base: '', tab: '', csv: null, csvName: '', overrides: null };
+const state = { folder: 'all', base: '', tab: '', csv: null, csvName: '', overrides: null, sources: [] }; // sources: 取り込んだ内示（複数可。案件ごとに後から来たものが勝つ）
 let aiReady = false;
 let data = null;
 
@@ -69,7 +69,7 @@ async function load() {
   }
   data = await res.json();
   const nameEl = document.getElementById('csvName');
-  if (nameEl) { nameEl.hidden = !state.csv; nameEl.innerHTML = state.csv ? `${esc(state.csvName)} <button type="button" class="x" id="csvClear" aria-label="外す">×</button>` : ''; }
+  if (nameEl) { nameEl.hidden = !state.csv; nameEl.innerHTML = state.csv ? `${state.sources.map((src, i) => `<span class="src">${esc(src.name)}<button type="button" class="x" data-src-clear="${i}" aria-label="外す">×</button></span>`).join('')}` : ''; }
   state.base = data.base;
   state.folder = data.selectedFolder;
   if (!data.tabs.some((t) => t.id === state.tab) && state.tab !== 'progress') state.tab = data.defaultTab;
@@ -84,6 +84,7 @@ async function load() {
   safe(() => renderFolders(), 'folders');
   safe(() => renderTabs(), 'tabs');
   safe(() => renderPanel(), 'panel');
+  setTaskData(data);
   if (aiReady) setChatContext({ folder: state.folder, base: data.base, examples: data.examples, scopeName: selected ? selected.name : 'すべての案件', csv: state.csv, overrides: state.overrides });
   writeHash();
 }
@@ -119,8 +120,8 @@ function panelTodo() {
     <div class="todo ${esc(t.tone)}" data-todo="${esc(t.id)}">
       <span class="dot" aria-hidden="true"></span>
       <div class="todo-body">
-        <div class="todo-main"><span class="who">${esc(t.who)}</span><b>${esc(t.what)}</b></div>
-        <div class="todo-sub">${all ? `<span class="tag">${esc(t.folderName)}</span>` : ''}${esc(t.sub)}</div>
+        <div class="todo-main"><span class="who">${esc(t.who)}${t.contact?.person ? `（${esc(t.contact.person.replace(/（.*?）/g, '').trim().split(/\s/).pop())}）` : ''}</span><b>${esc(t.what)}</b></div>
+        <div class="todo-sub">${all ? `<span class="tag">${esc(t.folderName)}</span>` : ''}${esc(t.sub)}${t.caution ? `<span class="caution">${esc(t.caution)}</span>` : ''}</div>
       </div>
       <div class="todo-acts">
         ${statusChip(t)}
@@ -184,7 +185,8 @@ function onPanelClick(e) {
   }
 }
 document.addEventListener('click', (e) => {
-  if (e.target.closest('#csvClear')) { state.csv = null; state.csvName = ''; load(); return; }
+  const clr = e.target.closest('[data-src-clear]');
+  if (clr) { state.sources.splice(Number(clr.dataset.srcClear), 1); state.csv = state.sources.length ? mergeCsv(state.sources) : null; state.csvName = state.sources.map((x) => x.name).join(' + '); load(); return; }
   if (e.target.closest('#sampleBtn')) {
     openPop(`<h3>見本の内示</h3><p class="pop-sub">架空の内示です。保存して、左上の枠に落としてください。同じ内示を、届く形ごとに用意しています。</p><ul class="files">
       <li><a href="/sample/内示_前回_2026-08-28.csv" download>内示_前回_2026-08-28.csv</a><small>前回と同じ → 変わった点なし</small></li>
@@ -230,8 +232,11 @@ function closePop() {
 async function applyCsv(csvText, meta = {}) {
   openPop(`<div class="drop-play"><div class="spin" aria-hidden="true"></div><p id="dropStep">計算中…</p><p class="muted">${esc(meta.name || '')}</p></div>`);
   const before = JSON.stringify((data?.folders || []).map((f) => [f.id, f.status]));
-  state.csv = csvText;
-  state.csvName = meta.name || '内示';
+  // 同じ名前のものは入れ替え、違うものは足す。複数の書類が 1 つの内示にまとまる（案件ごとに後から来た方が勝つ）
+  const name = meta.name || '内示';
+  state.sources = [...state.sources.filter((x) => x.name !== name), { name, csvText }];
+  state.csv = mergeCsv(state.sources);
+  state.csvName = state.sources.map((x) => x.name).join(' + ');
   await wait(500);
   await load();
   if (!state.csv) return; // 読めなかった（load() が案内を出している）

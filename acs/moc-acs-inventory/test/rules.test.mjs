@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { _build, getAiData, getDemoData, _PART } from '../src/data.js';
-import { SUPPLIERS, applyOverrides, getDefaultMasters, normalizeOverrides } from '../src/masters.js';
+import { CUSTOMER_CONTACT, SUPPLIERS, applyOverrides, getDefaultMasters, normalizeOverrides } from '../src/masters.js';
 
 const base = '2026-09-25';
 const part = (b, id, code) => b.folders.find((f) => f.id === id).parts.find((p) => p.code === code);
@@ -140,4 +140,58 @@ test('既定のマスターは data.js の値と一致し、毎回同じ', () =>
   assert.equal(getDefaultMasters().parts[0].lt, _PART[m.parts[0].code].lt);
   assert.equal(getDefaultMasters().bom.f01[0].qty, 2);
   assert.equal(getDefaultMasters().suppliers[0].person, SUPPLIERS[0].person);
+});
+
+test('やることの contact は masters.suppliers と一致し、お客様の行は得意先の窓口、社内の行は null', () => {
+  const d = getDemoData();
+  const sup = Object.fromEntries(d.masters.suppliers.map((s) => [s.maker, s]));
+  for (const kind of ['メーカーに連絡', 'お客様に連絡', '社内で決める', 'お客様に確認']) assert.ok(d.todos.some((t) => t.kind === kind), `${kind} の行がない`);
+  for (const t of d.todos) {
+    assert.ok(typeof t.caution === 'string' && t.caution.length <= 40, `${t.what}: caution が無い・長い「${t.caution}」`);
+    if (t.kind === 'メーカーに連絡') {
+      assert.ok(sup[t.who], `${t.who} の窓口がない`);
+      assert.deepEqual(t.contact, { maker: t.who, person: sup[t.who].person, email: sup[t.who].email, note: sup[t.who].note }, `${t.what}: contact が窓口と違う`);
+    } else if (t.kind === '社内で決める') {
+      assert.equal(t.contact, null);
+      assert.equal(t.caution, '');
+    } else {
+      assert.equal(t.contact.maker, t.who, '得意先の窓口の会社名は who と同じ');
+      assert.equal(t.contact.maker, CUSTOMER_CONTACT.maker);
+      assert.ok(t.contact.person && /@.*\.example\.jp$/.test(t.contact.email));
+    }
+  }
+  // 注意 1 行: 締切を過ぎた手配は「過ぎています。急ぎ」。締切も遅れもなければ窓口の注意
+  const ise = d.todos.find((t) => t.code === 'ISE1176' && t.kind === 'メーカーに連絡');
+  assert.equal(ise.caution, '締切 9/20 を過ぎています。急ぎ');
+  const lc = d.todos.find((t) => t.code === 'AS-06-148' && t.kind === 'メーカーに連絡');
+  assert.equal(lc.caution, '締切 9/17 を過ぎています。急ぎ');
+  for (const t of d.todos.filter((x) => x.kind === 'メーカーに連絡' && !/過ぎています|遅れ|今週中/.test(x.caution))) assert.equal(t.caution, sup[t.who].note, `${t.what}: 窓口の注意になっていない`);
+  // 画面の文に専門用語を入れない（spec と同じ語）
+  const text = JSON.stringify(d.todos.map((t) => [t.contact, t.caution]));
+  for (const jargon of ['リードタイム', '引当', '発注残', 'BOM', 'ロット', '基準日']) assert.ok(!text.includes(jargon), `専門用語「${jargon}」`);
+});
+
+test('overrides で担当者を変えると todos の contact と AI のやることも変わる', () => {
+  const o = { suppliers: { 東和光学: { person: '山田 花子', note: '午前中は電話が通じにくい' } } };
+  const d = getDemoData({ overrides: o, folder: 'f01' });
+  const towa = d.todos.filter((t) => t.kind === 'メーカーに連絡' && t.who === '東和光学');
+  assert.ok(towa.length >= 1);
+  for (const t of towa) {
+    assert.equal(t.contact.person, '山田 花子');
+    assert.equal(t.contact.note, '午前中は電話が通じにくい');
+    assert.equal(t.contact.email, SUPPLIERS.find((s) => s.maker === '東和光学').email, '直していない連絡先は既定のまま');
+  }
+  const other = d.todos.find((t) => t.kind === 'メーカーに連絡' && t.who !== '東和光学');
+  assert.equal(other.contact.person, SUPPLIERS.find((s) => s.maker === other.who).person, 'ほかのメーカーは変わらない');
+  // AI にも同じ担当者・注意
+  const ai = getAiData({ overrides: o, folder: 'f01' });
+  const aiTodos = ai.案件[0].やること;
+  assert.equal(aiTodos.length, d.todos.length);
+  d.todos.forEach((t, i) => {
+    assert.equal(aiTodos[i].担当者, t.contact?.person, `${t.what}: AI の担当者が違う`);
+    assert.equal(aiTodos[i].注意, t.caution || undefined, `${t.what}: AI の注意が違う`);
+  });
+  assert.ok(aiTodos.some((x) => x.担当者 === '山田 花子'));
+  // 既定に戻せば既定の担当者
+  assert.equal(getDemoData({ folder: 'f01' }).todos.find((t) => t.who === '東和光学' && t.kind === 'メーカーに連絡').contact.person, SUPPLIERS.find((s) => s.maker === '東和光学').person);
 });

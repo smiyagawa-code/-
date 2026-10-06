@@ -11,7 +11,7 @@
 //  C. クリーン仕様 搬送ユニット: 1台→取消。発注残 KS-300 30個などが過剰に。うち RB-120 は第2工場で 1台不足 → 振替候補
 //  D. AS-04-237（近接センサ）は 3案件で共用。第2工場で不足 14 → ロット 20 で追加手配 20
 
-import { applyOverrides, getDefaultMasters, normalizeOverrides } from './masters.js';
+import { CUSTOMER_CONTACT, applyOverrides, getDefaultMasters, normalizeOverrides, supplierLookup } from './masters.js';
 
 export const DEFAULT_BASE = '2026-09-25'; // 基準日（内示 9月版を受け取った日の想定）
 export const BASE_DATES = [
@@ -208,7 +208,8 @@ function build(base = DEFAULT_BASE, csvRowsIn = null, overrides = null) {
       ex.transfer = folders.filter((o) => o.id !== f.id).flatMap((o) => o.parts.filter((p) => p.code === ex.code && p.short > 0).map((p) => ({ folderId: o.id, folderName: o.name, short: p.short })));
     }
   }
-  for (const f of folders) if (!f.pending) f.todos = buildTodos(f, base);
+  const suppliers = supplierLookup(overrides); // メーカーの窓口（「設定」で直した担当者を反映）
+  for (const f of folders) if (!f.pending) f.todos = buildTodos(f, base, suppliers);
   return { base, urgentUntil: addDays(base, URGENT_DAYS), folders, csv: csvRowsIn ? { matched, unmatched: unmatched.map((r) => ({ line: r.line, name: r.name || r.model || '(案件名なし)' })) } : null };
 }
 
@@ -270,18 +271,26 @@ function buildFolder(f, base, catalog = PART) {
 }
 
 // やること（1件 = 1行で言えること）。文面は頼まれたときだけ開く
-function buildTodos(f, base) {
+// contact = 連絡先（メーカーの窓口は「設定」で直した担当者。お客様は得意先の窓口。社内の行は null）
+// caution = 注意 1 行（計算はしない。締切超過 → メーカー案内の遅れ → 今週中 → 窓口の注意 の順で、あるものを 1 つだけ）
+function buildTodos(f, base, suppliers = {}) {
   const { sep } = f.versions;
   const out = [];
   const sign = `${OUR_NAME}です。`;
   const openers = (to) => `${to}\n\nいつもお世話になっております。${sign}\n`;
+  const makerContact = (maker) => suppliers[maker] || { maker, person: '', email: '', note: '' };
+  const customerContact = { ...CUSTOMER_CONTACT, maker: CUSTOMER };
+  const makerCaution = (p) => (p.deadline && p.deadline < base ? `締切 ${md(p.deadline)} を過ぎています。急ぎ`
+    : p.delay > 0 ? `メーカー案内の遅れ ${p.delay}日`
+      : p.urgent ? `締切 ${md(p.deadline)}。今週中`
+        : makerContact(p.maker).note || '');
   // メーカーへ: 手配（遅れるなら短縮も聞く）
   for (const p of f.parts.filter((x) => x.short > 0)) {
     out.push({
       tone: p.late > 0 ? 'red' : p.urgent ? 'amber' : 'blue', kind: 'メーカーに連絡', who: p.maker,
       what: `${p.name} ${p.order}個を手配`,
       sub: p.late > 0 ? `${md(sep.due)} に ${p.late}日遅れ → 短縮できるか聞く` : p.urgent ? `締切 ${md(p.deadline)}${p.deadline < base ? '（過ぎている）' : ''}` : `${md(p.eta)} に届く`,
-      code: p.code, why: p.why,
+      code: p.code, why: p.why, contact: makerContact(p.maker), caution: makerCaution(p),
       draft: { subject: `【手配】${p.code} ${p.name} ${p.order}個`, body: `${openers(`${p.maker} 営業ご担当者様`)}${CUSTOMER}様「${f.name}」向けに、下記をお願いします。\n\n・${p.code} ${p.name}：${p.order}個\n${p.late > 0 ? `\n希望納期 ${md(sep.due)} に対し、御社納期では ${md(p.eta)} 着の見込みです。短縮が可能でしたら最短の納期をお知らせください。` : `\n納期は ${md(p.eta)} 着で承知しています。`}\n\nよろしくお願いいたします。` },
     });
   }
@@ -289,6 +298,7 @@ function buildTodos(f, base) {
   for (const p of f.parts.filter((x) => x.short === 0 && x.late > 0)) {
     out.push({
       tone: 'red', kind: 'メーカーに連絡', who: p.maker, what: `${p.name} 頼み済み ${p.po}個の入荷を早められるか聞く`, sub: `${md(p.poDate)} 入荷 → ${p.late}日遅れ`, code: p.code, why: p.why,
+      contact: makerContact(p.maker), caution: p.delay > 0 ? `メーカー案内の遅れ ${p.delay}日` : makerContact(p.maker).note || '',
       draft: { subject: `【納期前倒しのご相談】${p.code} ${p.name}`, body: `${openers(`${p.maker} 営業ご担当者様`)}発注済みの ${p.code} ${p.name} ${p.po}個（入荷予定 ${md(p.poDate)}）について、${md(sep.due)} までに入荷できないかご相談です。\n\n可能な最短の納期をお知らせください。よろしくお願いいたします。` },
     });
   }
@@ -297,6 +307,7 @@ function buildTodos(f, base) {
   if (lateParts.length) {
     out.push({
       tone: 'red', kind: 'お客様に連絡', who: CUSTOMER, what: `${md(sep.due)} に間に合わない部品 ${lateParts.length}点 → 納期を相談`, sub: lateParts.map((p) => `${p.name} ${p.late}日`).join('、'), code: '', why: lateParts.flatMap((p) => [`■ ${p.code} ${p.name}`, ...p.why.slice(-2)]),
+      contact: customerContact, caution: '',
       draft: { subject: `【納期ご相談】${f.name}`, body: `${openers(`${CUSTOMER} 購買ご担当者様`)}${md(sep.date)} 付の内示（${f.name}）について、下記はメーカー納期の都合で希望日 ${md(sep.due)} に間に合わない見込みです。\n\n${lateParts.map((p) => `・${p.code} ${p.name}：${md(p.eta)} 着（${p.late}日遅れ）`).join('\n')}\n\n分納、または納期のご相談をさせていただけないでしょうか。よろしくお願いいたします。` },
     });
   }
@@ -305,6 +316,7 @@ function buildTodos(f, base) {
     const t = e.transfer?.[0];
     out.push({
       tone: 'amber', kind: '社内で決める', who: '購買・営業', what: `${e.name} 頼み済み ${e.excess}個が余る`, sub: t ? `「${t.folderName}」で ${t.short}個足りない → 回せる` : `約${man(e.amount)}万円 → キャンセルできるか聞く`, code: e.code,
+      contact: null, caution: '',
       why: [`前回は使う予定だった（${f.changes.map((c) => c.title).join('、')}）`, `頼み済み ${e.excess}個・入荷 ${md(e.poDate)}・約${man(e.amount)}万円`, t ? `${t.folderName} で同じ型番が ${t.short}個足りない` : 'ほかの案件で使う予定なし'],
       draft: { subject: `【要判断】${e.code} ${e.name} 頼み済み ${e.excess}個の扱い`, body: `${f.name}（${f.changes.map((c) => c.title).join('、')}）により、${e.code} ${e.name} の頼み済み ${e.excess}個（入荷 ${md(e.poDate)}、約${man(e.amount)}万円）が不要になります。\n\n${t ? `「${t.folderName}」で同じ型番が ${t.short}個足りないため、そちらへ回すことを提案します。` : 'メーカーにキャンセル可否を確認するか、在庫として持つかをご判断ください。'}` },
     });
@@ -313,6 +325,7 @@ function buildTodos(f, base) {
   for (const r of (f.reading || []).filter((x) => x.check)) {
     out.push({
       tone: 'blue', kind: 'お客様に確認', who: CUSTOMER, what: r.ask || r.value, sub: r.value, code: '', why: [`内示の記載: ${r.value}`, `読み取り元: ${r.from}`],
+      contact: customerContact, caution: '',
       draft: { subject: `【ご確認】${f.name} 内示の記載`, body: `${openers(`${CUSTOMER} 購買ご担当者様`)}${md(sep.date)} 付の内示（${f.name}）について、1点ご確認させてください。\n\n・${r.value}\n\nお手数ですが、ご回答をお願いいたします。` },
     });
   }
@@ -427,7 +440,7 @@ export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null, ove
         部品: f.parts.map((p) => partRow(f, p)),
         余る頼み済み分: f.excess.map((e) => ({ 型番: e.code, 品名: e.name, 余る数_個: e.excess, 入荷日: e.poDate, 金額_円: e.amount, 回せる先: (e.transfer || []).map((t) => `${t.folderName}で${t.short}個足りない`) })),
         内示からの読み取り: f.reading,
-        やること: f.todos.map((t) => ({ 種類: t.kind, 相手: t.who, 内容: t.what, 補足: t.sub })),
+        やること: f.todos.map((t) => ({ 種類: t.kind, 相手: t.who, ...(t.contact?.person ? { 担当者: t.contact.person, 連絡先: t.contact.email } : {}), 内容: t.what, 補足: t.sub, ...(t.caution ? { 注意: t.caution } : {}) })),
       }),
   };
 }

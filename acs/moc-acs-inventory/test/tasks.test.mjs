@@ -14,7 +14,7 @@ globalThis.localStorage = {
 
 const tasks = await import('../public/tasks.js');
 const order = await import('../public/order.js');
-const { taskKey, taskType, initialStatus, getStatus, setStatus, progressSummary, renderProgress, statusChip, history, STATUSES, nextStatuses, orderable } = tasks;
+const { taskKey, taskType, initialStatus, getStatus, setStatus, progressSummary, renderProgress, statusChip, history, STATUSES, nextStatuses, orderable, buildNotice, buildCaseNotice, noticeText } = tasks;
 
 const all = () => getDemoData({ folder: 'all' });
 const BAD = ['undefined', 'NaN', 'Infinity', '[object Object]', 'null'];
@@ -72,7 +72,9 @@ test('状態を動かすと保存され、履歴に いつ・誰が・前→後�
   assert.equal(getStatus(key, t), '発注済・回答待ち');
   assert.equal(getStatus(key), '発注済・回答待ち', 'item 無しでも保存済みなら返る');
   setStatus(key, '入荷待ち', '', t);
-  const log = history();
+  const all_ = history();
+  assert.equal(all_.filter((e) => e.after === '通知文を作成').length, 1, '発注済にしたとき通知文の行が 1 つ');
+  const log = all_.filter((e) => e.after !== '通知文を作成');
   assert.equal(log.length, 2);
   assert.equal(log[0].after, '入荷待ち'); assert.equal(log[0].before, '発注済・回答待ち');
   assert.equal(log[1].before, '内示待ち'); assert.equal(log[1].after, '発注済・回答待ち'); assert.equal(log[1].note, '発注書を出した');
@@ -194,4 +196,67 @@ test('発注書: parts の数字・案件・差出人・メーカー担当者が
   assert.equal(o3.contact, '佐藤'); assert.equal(o3.tel, '03-1111-1111');
   // masters が無くても落ちない
   assert.doesNotThrow(() => order.buildOrder(t, { todos: d.todos }, today));
+});
+
+test('通知文: 発注済にすると「発注しました」、完了なら「入荷」。案件の残り件数が 1 行つく', () => {
+  const d = getDemoData({ folder: 'f02' });
+  const t = d.todos.find((x) => taskType(x) === '手配' && x.code === 'D-1178');
+  assert.ok(t);
+  const part = d.parts.find((p) => p.code === 'D-1178');
+  const at = new Date(2026, 9, 6, 9, 50).toISOString();
+  const n = buildNotice(t, d, '発注済・回答待ち', { who: '高橋', at });
+  assert.equal(n.subject, `【発注完了】大和精密製作所 組立セル AS-500 導入 — D-1178 ${part.name} ${part.order}個`);
+  assert.ok(n.body.includes(`D-1178 ${part.name} ${part.order}個を${part.maker}へ発注しました（担当: 高橋、10/6 09:50）。`), n.body);
+  assert.ok(n.body.includes(`入荷予定 ${part.eta}。`));
+  const remain = d.todos.filter((x) => x.folderId === 'f02').length;
+  assert.ok(n.body.includes(`この案件の残り: 内示待ち ${remain} 件。`));
+  assert.ok(n.to.includes('購買部・営業部'));
+  const text = noticeText(n);
+  for (const must of ['宛先:', '件名:', n.subject, n.body]) assert.ok(text.includes(must));
+  for (const bad of BAD) assert.ok(!text.includes(bad));
+  // 完了
+  const done = buildNotice(t, d, '完了', { who: '高橋', at });
+  assert.ok(done.subject.startsWith('【完了】'));
+  assert.ok(done.body.includes('入荷し、案件に充てました'));
+  // 型番の無いやること（お客様に確認）でも落ちず、文が出る
+  const check = d.todos.find((x) => taskType(x) === '確認');
+  const n2 = buildNotice(check, d, '完了', { who: '高橋', at });
+  assert.ok(n2.subject.includes(check.what) && n2.body.includes('対応が終わりました'));
+  // d が無くても落ちない（残りの行は付かない）
+  const n3 = buildNotice(t, null, '発注済・回答待ち', { who: '高橋', at });
+  assert.ok(n3.body.includes('発注しました') && !n3.body.includes('残り'));
+  for (const bad of BAD) assert.ok(!noticeText(n3).includes(bad));
+});
+
+test('通知文: 案件の内示待ちが 0 になった瞬間だけ「案件の発注完了」が出て、履歴に残る', () => {
+  const d = getDemoData({ folder: 'f02' });
+  const items = d.todos.filter((x) => x.folderId === 'f02');
+  const folder = d.folders.find((f) => f.id === 'f02');
+  localStorage.setItem('moc-acs:me', JSON.stringify('高橋'));
+  items.slice(0, -1).forEach((t) => setStatus(taskKey(t), '発注済・回答待ち', '', t, d));
+  let log = history();
+  assert.equal(log.filter((e) => e.after === '通知文を作成').length, items.length - 1, '1 件ごとに通知文の行');
+  assert.ok(!log.some((e) => e.note.startsWith('【案件の発注完了】')), 'まだ案件の通知は出ない');
+  const last = items[items.length - 1];
+  setStatus(taskKey(last), '見送り', '', last, d);
+  log = history();
+  const caseLog = log.filter((e) => e.note.startsWith('【案件の発注完了】'));
+  assert.equal(caseLog.length, 1);
+  assert.equal(caseLog[0].note, `【案件の発注完了】大和精密製作所 ${folder.name}`);
+  assert.ok(!log.some((e) => e.after === '通知文を作成' && e.note.startsWith('【発注完了】') && e.key === taskKey(last)), '見送りでは 1 件の通知文は出ない');
+  // 中身
+  const sum = progressSummary(d).find((x) => x.folderId === 'f02');
+  const cn = buildCaseNotice(folder, sum);
+  assert.equal(cn.body, `やること ${items.length} 件すべて対応済み（発注済 ${items.length - 1}／入荷待ち 0／完了 0／見送り 1）。\n詳細は画面の「進捗」をご覧ください。`);
+  // 戻してもう一度 0 にすると、もう一度出る（「0 になった瞬間」ごと）
+  setStatus(taskKey(last), '内示待ち', '', last, d);
+  setStatus(taskKey(last), '完了', '', last, d);
+  assert.equal(history().filter((e) => e.note.startsWith('【案件の発注完了】')).length, 2);
+  // 同じ状態を入れ直しても 1 件の通知文は増えない
+  const before = history().length;
+  setStatus(taskKey(last), '完了', '', last, d);
+  assert.equal(history().length - before, 1, '状態の行だけ増える');
+  // 履歴は進捗タブに出る
+  const html = renderProgress(d);
+  assert.ok(html.includes('通知文を作成') && html.includes('【案件の発注完了】'));
 });
