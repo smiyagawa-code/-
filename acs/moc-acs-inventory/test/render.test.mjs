@@ -18,6 +18,9 @@ function fakeElement(id) {
 test('全フォルダ × 全タブで画面が壊れない', async () => {
   const els = new Map();
   const errors = [];
+  // 画面側の保存（public/store.js）は localStorage を使う。Node では無いので偽物を置く
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k), key: (i) => [...mem.keys()][i] ?? null, get length() { return mem.size; } };
   globalThis.document = {
     title: '',
     getElementById: (id) => { if (!els.has(id)) els.set(id, fakeElement(id)); return els.get(id); },

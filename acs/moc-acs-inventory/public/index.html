@@ -21,6 +21,7 @@
       <div class="top-meta">
         <span class="asof" id="asOf"></span>
         <span class="badge">架空データ</span>
+        <button type="button" class="top-btn" id="settingsBtn">設定</button>
       </div>
     </div>
   </header>
@@ -30,9 +31,10 @@
       <label class="drop" id="drop" tabindex="0">
         <span class="drop-icon" aria-hidden="true">＋</span>
         <span class="drop-text">内示をここに置く</span>
-        <input type="file" id="dropInput" accept=".csv,text/csv" hidden>
+        <span class="drop-sub">CSV・Excel・PDF・メール</span>
+        <input type="file" id="dropInput" accept=".csv,.xlsx,.pdf,.txt,.eml,text/csv,application/pdf" hidden>
       </label>
-      <div class="drop-foot"><span id="csvName" class="csv-name" hidden></span><button type="button" class="link small" id="sampleBtn">見本の CSV</button></div>
+      <div class="drop-foot"><span id="csvName" class="csv-name" hidden></span><button type="button" class="link small" id="memoBtn">メモ帳に転記</button><button type="button" class="link small" id="sampleBtn">見本</button></div>
       <nav id="folders" class="folder-list"></nav>
     </aside>
 

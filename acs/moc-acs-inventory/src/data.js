@@ -11,6 +11,8 @@
 //  C. クリーン仕様 搬送ユニット: 1台→取消。発注残 KS-300 30個などが過剰に。うち RB-120 は第2工場で 1台不足 → 振替候補
 //  D. AS-04-237（近接センサ）は 3案件で共用。第2工場で不足 14 → ロット 20 で追加手配 20
 
+import { applyOverrides, getDefaultMasters, normalizeOverrides } from './masters.js';
+
 export const DEFAULT_BASE = '2026-09-25'; // 基準日（内示 9月版を受け取った日の想定）
 export const BASE_DATES = [
   { value: '2026-09-25', label: '9/25（9月版の内示を受け取った日・想定）' },
@@ -127,10 +129,11 @@ export function parseNaishiCsv(text) {
   rows.slice(1).forEach((r, i) => {
     if (r.every((c) => !c.trim())) return;
     const line = i + 2;
-    const qty = Number(get(r, 'qty').replace(/[台個,]/g, ''));
+    const qtyText = get(r, 'qty').replace(/[台個,]/g, '').trim();
+    const qty = qtyText === '' ? NaN : Number(qtyText); // 空欄は 0 ではなく「読めない」
     const due = isoDate(get(r, 'due'));
     if (!Number.isInteger(qty) || qty < 0) { errors.push(`${line}行目: 数量「${get(r, 'qty')}」が読めません`); return; }
-    if (!due) { errors.push(`${line}行目: 納入希望日「${get(r, 'due')}」が読めません`); return; }
+    if (!due && qty > 0) { errors.push(`${line}行目: 納入希望日「${get(r, 'due')}」が読めません`); return; } // 取消（0台）は希望日が無くてもよい
     out.push({
       line, date: isoDate(get(r, 'date')) || '', customer: get(r, 'customer'), name: get(r, 'name'), model: get(r, 'model'), qty, due,
       options: get(r, 'options').split(/[・、,/／]/).map((o) => o.trim()).filter((o) => o && o !== '標準' && o !== 'なし'),
@@ -187,15 +190,18 @@ function readingFromCsv(f, r) {
 }
 
 // ---------- 計算（ここだけ） ----------
-function build(base = DEFAULT_BASE, csvRowsIn = null) {
+// overrides = 画面の「設定」で直した値（検証済み。src/masters.js の normalizeOverrides）。部品カタログと案件の部品表に当ててから計算する
+function build(base = DEFAULT_BASE, csvRowsIn = null, overrides = null) {
   const { over, matched, unmatched } = csvRowsIn ? applyCsv(csvRowsIn) : { over: {}, matched: [], unmatched: [] };
+  const catalog = overrides?.parts ? Object.fromEntries(Object.entries(PART).map(([code, p]) => [code, { ...p, ...(overrides.parts[code] || {}) }])) : PART;
   const withCsv = (f) => {
     const r = over[f.id];
     if (!r) return f;
-    const sep = { date: r.date || f.versions.sep.date, qty: r.qty, due: r.due, options: r.options, note: r.note };
+    const sep = { date: r.date || f.versions.sep.date, qty: r.qty, due: r.due || f.versions.sep.due, options: r.options, note: r.note };
     return { ...f, versions: { aug: f.versions.aug, sep }, reading: readingFromCsv(f, r), fromCsv: true };
   };
-  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(withCsv(f), base)));
+  const withBom = (f) => (overrides?.bom?.[f.id] ? { ...f, bom: overrides.bom[f.id].map((r) => (r.option ? [r.code, r.qty, r.option] : [r.code, r.qty])) } : f);
+  const folders = FOLDERS.map((f) => (f.pending ? { ...f, parts: [], changes: [], excess: [], todos: [] } : buildFolder(withBom(withCsv(f)), base, catalog)));
   // 回せる先: 余った頼み済み分と同じ型番が、ほかの案件で足りない
   for (const f of folders) {
     for (const ex of f.excess) {
@@ -206,13 +212,13 @@ function build(base = DEFAULT_BASE, csvRowsIn = null) {
   return { base, urgentUntil: addDays(base, URGENT_DAYS), folders, csv: csvRowsIn ? { matched, unmatched: unmatched.map((r) => ({ line: r.line, name: r.name || r.model || '(案件名なし)' })) } : null };
 }
 
-function buildFolder(f, base) {
+function buildFolder(f, base, catalog = PART) {
   const { aug, sep } = f.versions;
   const hasOpt = (v, opt) => v.options.some((o) => o === opt || o.includes(opt) || opt.includes(o));
   const need = (v, code, opt) => (opt && !hasOpt(v, opt) ? 0 : v.qty * (f.bom.find(([c, , o]) => c === code && (o || null) === (opt || null))?.[1] ?? 0));
   const codes = [...new Set(f.bom.map(([c]) => c))];
   const parts = codes.map((code) => {
-    const p = PART[code];
+    const p = catalog[code];
     const opts = f.bom.filter(([c]) => c === code).map(([, , o]) => o || null);
     const needAug = sum(opts.map((o) => need(aug, code, o)));
     const needSep = sum(opts.map((o) => need(sep, code, o)));
@@ -315,9 +321,11 @@ function buildTodos(f, base) {
 }
 
 // ---------- 画面向け ----------
-export function getDemoData({ base = DEFAULT_BASE, folder = 'all', csv = null } = {}) {
+export function getDemoData({ base = DEFAULT_BASE, folder = 'all', csv = null, overrides = null } = {}) {
   base = normalizeBase(base);
-  const b = build(base, normalizeCsv(csv));
+  overrides = normalizeOverrides(overrides);
+  const b = build(base, normalizeCsv(csv), overrides);
+  const mastersDefault = getDefaultMasters();
   const selected = b.folders.find((f) => f.id === folder) || null;
   const active = b.folders.filter((f) => !f.pending);
   const scope = selected ? [selected] : active;
@@ -363,6 +371,10 @@ export function getDemoData({ base = DEFAULT_BASE, folder = 'all', csv = null } 
     parts: rows,
     rules: RULES,
     examples: suggestQuestions(selected, rows, changes),
+    // 「設定」の窓が使う: 直した後のマスター・既定のマスター・いま効いている上書き（検証済み）
+    masters: applyOverrides(mastersDefault, overrides),
+    masters_default: mastersDefault,
+    overrides: overrides || {},
   };
 }
 
@@ -389,9 +401,9 @@ function suggestQuestions(selected, rows, changes) {
 }
 
 // ---------- AI 向け（画面と同じ build() の結果。選択中のフォルダだけを渡す） ----------
-export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null } = {}) {
+export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null, overrides = null } = {}) {
   base = normalizeBase(base);
-  const b = build(base, normalizeCsv(csv));
+  const b = build(base, normalizeCsv(csv), normalizeOverrides(overrides));
   const selected = b.folders.find((f) => f.id === folder) || null;
   const scope = selected ? [selected] : b.folders.filter((f) => !f.pending);
   const partRow = (f, p) => ({
@@ -421,7 +433,7 @@ export function getAiData({ base = DEFAULT_BASE, folder = 'all', csv = null } = 
 }
 
 // テスト用に計算結果をそのまま出す
-export function _build(base = DEFAULT_BASE, csv = null) { return build(normalizeBase(base), normalizeCsv(csv)); }
+export function _build(base = DEFAULT_BASE, csv = null, overrides = null) { return build(normalizeBase(base), normalizeCsv(csv), normalizeOverrides(overrides)); }
 
 // 画面から来る csv は「CSV の文字列」か「parseNaishiCsv の rows」。どちらでも受ける。大きすぎるものは無視
 const MAX_CSV_CHARS = 20000;
