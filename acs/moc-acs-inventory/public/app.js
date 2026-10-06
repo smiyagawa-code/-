@@ -120,7 +120,7 @@ function panelTodo() {
     <div class="todo ${esc(t.tone)}" data-todo="${esc(t.id)}">
       <span class="dot" aria-hidden="true"></span>
       <div class="todo-body">
-        <div class="todo-main"><span class="who">${esc(t.who)}${t.contact?.person ? `（${esc(t.contact.person.replace(/（.*?）/g, '').trim().split(/\s/).pop())}）` : ''}</span><b>${esc(t.what)}</b></div>
+        <div class="todo-main"><span class="who">${esc(t.who)}${t.contact?.person ? `（${esc(familyName(t.contact.person))}）` : ''}</span><b>${esc(t.what)}</b></div>
         <div class="todo-sub">${all ? `<span class="tag">${esc(t.folderName)}</span>` : ''}${esc(t.sub)}${t.caution ? `<span class="caution">${esc(t.caution)}</span>` : ''}</div>
       </div>
       <div class="todo-acts">
@@ -253,6 +253,8 @@ async function applyCsv(csvText, meta = {}) {
   if (first) { state.folder = first.id; state.tab = 'changes'; await load(); }
 }
 // ---------- 小道具 ----------
+// 「生産管理部 中村 由紀」→「中村」（部署を除いた最初の語＝姓）
+function familyName(person) { const w = String(person || '').replace(/（.*?）/g, '').trim().split(/\s+/).filter((x) => x && !/[部課係室]$/.test(x)); return w[0] || ''; }
 function table(cols, rows) { return `<div class="table-wrap"><table><thead><tr>${cols.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`; }
 function tr(cells, cls = '', attrs = '') { return `<tr class="${cls}" ${attrs}>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`; }
 function n(v) { return esc(fmt(v)); }
