@@ -33,6 +33,11 @@
 //      （onTaskClick(e, data, …) や renderProgress(data) を通れば自動で覚えるが、app.js が openOrder を直接呼ぶ経路では
 //        これが無いと残り件数と入荷予定が入らない。無くても落ちない）
 //
+//   6) 追加発注（配線は不要）: 発注済みにした時の手配数を ordered に残し、更新の内示で手配数が増えると
+//      statusChip の横に赤い「追加 +n 個」、減ると黄色の「減 −n 個」が出る（進捗タブの行も同じ）。
+//      「発注書」を押すと「追加分の発注書」（数量は差分）。発注済みにすると ordered が更新され、状態はそのまま、
+//      履歴に「追加発注」、通知文は【追加発注】。手配数は parts の order（無ければ やることの文「n個を手配」）。
+//
 // ■ style.css に足すなら（無くても動く。最低限はインラインで当てている）
 //   .pill.status { cursor: pointer; border: 0; } .prog-head { display:flex; gap:10px; align-items:center; }
 //

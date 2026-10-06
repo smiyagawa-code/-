@@ -14,7 +14,7 @@ globalThis.localStorage = {
 
 const tasks = await import('../public/tasks.js');
 const order = await import('../public/order.js');
-const { taskKey, taskType, initialStatus, getStatus, setStatus, progressSummary, renderProgress, statusChip, history, STATUSES, nextStatuses, orderable, buildNotice, buildCaseNotice, noticeText } = tasks;
+const { taskKey, taskType, initialStatus, getStatus, setStatus, progressSummary, renderProgress, statusChip, history, STATUSES, nextStatuses, orderable, buildNotice, buildCaseNotice, noticeText, extraOf, currentQty } = tasks;
 
 const all = () => getDemoData({ folder: 'all' });
 const BAD = ['undefined', 'NaN', 'Infinity', '[object Object]', 'null'];
@@ -259,4 +259,89 @@ test('通知文: 案件の内示待ちが 0 になった瞬間だけ「案件の
   // 履歴は進捗タブに出る
   const html = renderProgress(d);
   assert.ok(html.includes('通知文を作成') && html.includes('【案件の発注完了】'));
+});
+
+// 内示の更新で手配数が変わった /api/data を作る（同じ key のまま、数量だけ変える）
+function withQty(d, code, newOrder) {
+  const c = JSON.parse(JSON.stringify(d));
+  const p = c.parts.find((x) => x.code === code);
+  const old = p.order; p.order = newOrder;
+  const t = c.todos.find((x) => x.code === code && /手配/.test(x.what));
+  t.what = t.what.replace(`${old}個`, `${newOrder}個`);
+  return c;
+}
+
+test('発注済みにすると手配数を ordered に残し、増えたら「追加 +n 個」、減ったら「減 −n 個」', () => {
+  const d = getDemoData({ folder: 'f01' });
+  const t = d.todos.find((x) => x.code === 'ISE1176' && /手配/.test(x.what));
+  const key = taskKey(t);
+  const part = d.parts.find((p) => p.code === 'ISE1176');
+  assert.equal(currentQty(t, d), part.order);
+  assert.equal(extraOf(key, t, d), null, '内示待ちでは何も出ない');
+  setStatus(key, '発注済・回答待ち', '', t, d);
+  assert.equal(tasks.getTask(key).ordered, part.order);
+  assert.equal(tasks.getTask(key).orderedEta, part.eta);
+  assert.equal(extraOf(key, t, d), null, '同じ数なら何も出ない');
+  assert.ok(!statusChip(key, t).includes('追加'));
+  // 更新の内示で +3
+  const d2 = withQty(d, 'ISE1176', part.order + 3);
+  const t2 = d2.todos.find((x) => x.code === 'ISE1176' && /手配/.test(x.what));
+  assert.equal(taskKey(t2), key, '同じ key のまま');
+  assert.deepEqual(extraOf(key, t2, d2), { ordered: part.order, current: part.order + 3, diff: 3, eta: part.eta });
+  tasks.setTaskData(d2);
+  assert.ok(statusChip(key, t2).includes('追加 +3 個'), statusChip(key, t2));
+  assert.ok(statusChip(key, t2).includes('pill red'));
+  assert.ok(renderProgress(d2).includes('追加 +3 個'), '進捗タブの行にも出る');
+  // 入荷待ちでも出る。完了では出ない
+  setStatus(key, '入荷待ち', '', t2, d2);
+  assert.ok(statusChip(key, t2).includes('追加 +3 個'));
+  setStatus(key, '完了', '', t2, d2);
+  assert.ok(!statusChip(key, t2).includes('追加'));
+  assert.equal(tasks.getTask(key).ordered, part.order, 'ordered は状態を進めても残る');
+  // 減った
+  setStatus(key, '発注済・回答待ち', '', t2, d2); // 完了→（見送り経由なしでも setStatus は受ける）ordered は今の手配数に
+  const d3 = withQty(d, 'ISE1176', 1);
+  const t3 = d3.todos.find((x) => x.code === 'ISE1176' && /手配/.test(x.what));
+  tasks.setTaskData(d3);
+  const chip = statusChip(key, t3);
+  assert.ok(chip.includes(`減 −${part.order + 3 - 1} 個`) && chip.includes('pill amber'), chip);
+  // 減ったときは発注書は「追加分」にならない
+  assert.equal(order.buildOrder(t3, d3).extra, null);
+});
+
+test('追加分の発注書: 数量は差分、備考の先頭に前回分。発注済みにすると ordered が更新され、履歴と通知文は【追加発注】', () => {
+  const d = getDemoData({ folder: 'f02' });
+  const t = d.todos.find((x) => x.code === 'D-1178' && /手配/.test(x.what));
+  const key = taskKey(t);
+  const part = d.parts.find((p) => p.code === 'D-1178');
+  localStorage.setItem('moc-acs:me', JSON.stringify('高橋'));
+  setStatus(key, '発注済・回答待ち', '発注書を出した', t, d);
+  const d2 = withQty(d, 'D-1178', part.order + 2);
+  const t2 = d2.todos.find((x) => x.code === 'D-1178' && /手配/.test(x.what));
+  const o = order.buildOrder(t2, d2, new Date(2026, 9, 6));
+  assert.equal(o.qty, 2, '数量は差分だけ');
+  assert.ok(o.note.startsWith(`追加分（前回 ${part.order}個は発注済み・入荷予定 ${part.eta}）`), o.note);
+  assert.deepEqual(o.extra, { ordered: part.order, current: part.order + 2, diff: 2, eta: part.eta });
+  const text = order.orderText(o);
+  assert.ok(text.startsWith('追加分の発注書（下書き）') && text.includes('数量：2個'));
+  // 発注済みにする（状態はそのまま、ordered が更新）
+  const before = history().length;
+  setStatus(key, '発注済・回答待ち', '追加分の発注書を出した', t2, d2);
+  assert.equal(getStatus(key), '発注済・回答待ち');
+  assert.equal(tasks.getTask(key).ordered, part.order + 2);
+  assert.equal(extraOf(key, t2, d2), null, '更新後は札が消える');
+  const log = history().slice(0, history().length - before);
+  const add = log.find((e) => e.after === '追加発注');
+  assert.ok(add, '履歴に「追加発注」');
+  assert.ok(add.note.includes(`+2個（${part.order} → ${part.order + 2}）`), add.note);
+  const notice = log.find((e) => e.after === '通知文を作成');
+  assert.ok(notice && notice.note.startsWith('【追加発注】大和精密製作所'), notice?.note);
+  assert.ok(notice.note.includes('D-1178 +2個'));
+  const n = buildNotice(t2, d2, '追加発注', { who: '高橋', at: new Date(2026, 9, 6, 9, 50).toISOString(), added: 2, ordered: part.order + 2 });
+  assert.ok(n.body.includes(`D-1178 ${part.name} 2個を${part.maker}へ追加で発注しました（担当: 高橋、10/6 09:50）。累計 ${part.order + 2}個。`), n.body);
+  for (const bad of BAD) assert.ok(!noticeText(n).includes(bad) && !text.includes(bad));
+  // 数が変わらないのに もう一度 発注済にしても「追加発注」にはならない
+  const before2 = history().length;
+  setStatus(key, '発注済・回答待ち', '', t2, d2);
+  assert.ok(!history().slice(0, history().length - before2).some((e) => e.after === '追加発注'));
 });
